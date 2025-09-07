@@ -19,7 +19,6 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["wrap_help"] }
 ignore = { workspace = true }
 itertools = { workspace = true }
-libcst = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
 tempfile = { workspace = true }

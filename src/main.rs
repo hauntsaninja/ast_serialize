@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
 mod print_ast;
-mod print_cst;
 mod print_tokens;
 
 #[derive(Parser)]
@@ -23,8 +22,6 @@ struct Args {
 enum Command {
     /// Print the AST for a given Python file.
     PrintAST(print_ast::Args),
-    /// Print the LibCST CST for a given Python file.
-    PrintCST(print_cst::Args),
     /// Print the token stream for a given Python file.
     PrintTokens(print_tokens::Args),
 }
@@ -36,7 +33,6 @@ fn main() -> Result<ExitCode> {
     #[expect(clippy::print_stdout)]
     match command {
         Command::PrintAST(args) => print_ast::main(&args)?,
-        Command::PrintCST(args) => print_cst::main(&args)?,
         Command::PrintTokens(args) => print_tokens::main(&args)?,
     }
     Ok(ExitCode::SUCCESS)
