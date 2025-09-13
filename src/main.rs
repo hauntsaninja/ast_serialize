@@ -15,7 +15,7 @@ mod serialize_ast;
 #[command(propagate_version = true)]
 struct Args {
     #[command(subcommand)]
-    command: Command
+    command: Command,
 }
 
 #[derive(Subcommand)]
@@ -30,9 +30,7 @@ enum Command {
 }
 
 fn main() -> Result<ExitCode> {
-    let Args {
-        command
-    } = Args::parse();
+    let Args { command } = Args::parse();
     #[expect(clippy::print_stdout)]
     match command {
         Command::PrintAST(args) => print_ast::main(&args)?,

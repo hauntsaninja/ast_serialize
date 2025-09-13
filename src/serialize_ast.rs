@@ -1,14 +1,14 @@
 //! Serialize the AST for a given Python file as a mypy AST
 
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Instant;
-use std::io::{self, Write};
 
 use anyhow::Result;
 use ruff_linter::source_kind::SourceKind;
 use ruff_python_ast::PySourceType;
-use ruff_python_parser::{ParseOptions, parse};
 use ruff_python_ast::{self as ast};
+use ruff_python_parser::{ParseOptions, parse};
 
 const TAG_EXPR_STMT: u8 = 100;
 const TAG_CALL_EXPR: u8 = 101;
@@ -32,7 +32,7 @@ pub(crate) fn main(args: &Args) -> Result<()> {
     })?;
     let start = Instant::now();
     let python_ast =
-            parse(source_kind.source_code(), ParseOptions::from(source_type))?.into_syntax();
+        parse(source_kind.source_code(), ParseOptions::from(source_type))?.into_syntax();
     let duration = start.elapsed();
     let mut v = Vec::new();
     python_ast.serialize(&mut v).unwrap();
@@ -54,7 +54,9 @@ impl Ser for ast::Mod {
                     stmt.serialize(w)?;
                 }
             }
-            ast::Mod::Expression(_) => {panic!("Expression unsupported");}
+            ast::Mod::Expression(_) => {
+                panic!("Expression unsupported");
+            }
         }
         Ok(())
     }
@@ -88,10 +90,10 @@ impl Ser for ast::Expr {
                 let value = &s.value;
                 write_usize(w, value.len())?;
                 for part in value.iter() {
-                    write_bytes(w, part.as_bytes())?;
+                    w.write(part.as_bytes())?;
                 }
             }
-            ast::Expr::Call(c) => {                
+            ast::Expr::Call(c) => {
                 w.write(&[TAG_CALL_EXPR])?;
                 c.func.serialize(w)?;
                 let args = &c.arguments;
@@ -120,4 +122,39 @@ fn write_bytes(w: &mut impl Write, b: &[u8]) -> io::Result<()> {
     write_usize(w, b.len())?;
     w.write(b)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn print_hello() {
+        let opt = ParseOptions::from(PySourceType::Python);
+        let ast = parse("print('hello')", opt).unwrap().into_syntax();
+        let mut v = Vec::new();
+        ast.serialize(&mut v).unwrap();
+
+        let expected = &[
+            TAG_EXPR_STMT,
+            TAG_CALL_EXPR,
+            TAG_NAME_EXPR,
+            5,
+            b'p',
+            b'r',
+            b'i',
+            b'n',
+            b't',
+            1,
+            TAG_STR_EXPR,
+            5,
+            b'h',
+            b'e',
+            b'l',
+            b'l',
+            b'o',
+        ];
+
+        assert_eq!(v, expected);
+    }
 }
