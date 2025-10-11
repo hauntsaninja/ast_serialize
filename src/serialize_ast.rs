@@ -10,10 +10,12 @@ use ruff_python_ast::PySourceType;
 use ruff_python_ast::{self as ast};
 use ruff_python_parser::{ParseOptions, parse};
 
-const TAG_EXPR_STMT: u8 = 100;
-const TAG_CALL_EXPR: u8 = 101;
-const TAG_NAME_EXPR: u8 = 102;
-const TAG_STR_EXPR: u8 = 103;
+const TAG_EXPR_STMT: u8 = 11;
+const TAG_CALL_EXPR: u8 = 12;
+const TAG_NAME_EXPR: u8 = 13;
+const TAG_STR_EXPR: u8 = 14;
+
+const MIN_SHORT_INT: i64 = -10;
 
 #[derive(clap::Args)]
 pub(crate) struct Args {
@@ -33,12 +35,12 @@ pub(crate) fn main(args: &Args) -> Result<()> {
     let start = Instant::now();
     let python_ast =
         parse(source_kind.source_code(), ParseOptions::from(source_type))?.into_syntax();
-    let duration = start.elapsed();
+    let _ = start.elapsed();
     let mut v = Vec::new();
     python_ast.serialize(&mut v).unwrap();
 
-    let l = v.len();
-    println!("{duration:?} {l}");
+    io::stdout().write_all(&v)?;
+
     Ok(())
 }
 
@@ -97,7 +99,7 @@ impl Ser for ast::Expr {
                 w.write(&[TAG_CALL_EXPR])?;
                 c.func.serialize(w)?;
                 let args = &c.arguments;
-                write_usize(w, args.len())?;
+                write_int(w, args.len() as i64)?;
                 for arg in &args.args {
                     arg.serialize(w)?;
                 }
@@ -114,8 +116,14 @@ impl Ser for ast::Expr {
     }
 }
 
+fn write_int(w: &mut impl Write, i: i64) -> io::Result<usize> {
+    // TODO: Also support cases that don't fit into 1 byte
+    w.write(&[((i - MIN_SHORT_INT) << 1) as u8])
+}
+
 fn write_usize(w: &mut impl Write, i: usize) -> io::Result<usize> {
-    w.write(&[i as u8])
+    // TODO: Longer than 127 characters
+    w.write(&[(i << 1) as u8])
 }
 
 fn write_bytes(w: &mut impl Write, b: &[u8]) -> io::Result<()> {
@@ -139,15 +147,15 @@ mod tests {
             TAG_EXPR_STMT,
             TAG_CALL_EXPR,
             TAG_NAME_EXPR,
-            5,
+            10,
             b'p',
             b'r',
             b'i',
             b'n',
             b't',
-            1,
+            22,
             TAG_STR_EXPR,
-            5,
+            10,
             b'h',
             b'e',
             b'l',
