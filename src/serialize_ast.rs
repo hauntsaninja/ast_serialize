@@ -52,7 +52,7 @@ impl Ser for ast::Mod {
     fn serialize<W: Write>(&self, w: &mut W) -> io::Result<()> {
         match self {
             ast::Mod::Module(m) => {
-                write_usize(w, m.body.len())?;
+                write_int(w, m.body.len() as i64)?;
                 for stmt in &m.body {
                     stmt.serialize(w)?;
                 }
@@ -137,6 +137,11 @@ fn write_bytes(w: &mut impl Write, b: &[u8]) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    fn int_val(x: i64) -> u8 {
+        return ((x - MIN_SHORT_INT) << 1) as u8;
+    }
+
+
     #[test]
     fn print_hello() {
         let opt = ParseOptions::from(PySourceType::Python);
@@ -145,7 +150,7 @@ mod tests {
         ast.serialize(&mut v).unwrap();
 
         let expected = &[
-            2,
+            int_val(1),
             TAG_EXPR_STMT,
             TAG_CALL_EXPR,
             TAG_NAME_EXPR,
@@ -155,7 +160,7 @@ mod tests {
             b'i',
             b'n',
             b't',
-            22,
+            int_val(1),
             TAG_STR_EXPR,
             10,
             b'h',
