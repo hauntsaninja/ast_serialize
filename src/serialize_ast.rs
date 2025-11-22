@@ -25,7 +25,6 @@ const MIN_FOUR_BYTES_INT: i64 = -10000;
 const MAX_FOUR_BYTES_INT: i64 = 536860911;  // 2 ** (3 * 8 + 5) - 1 - 10000
 
 const TWO_BYTES_INT_BIT: i64 = 1;
-const FOUR_BYTES_INT_BIT: i64 = 2;
 const FOUR_BYTES_INT_TRAILER: i64 = 3;
 const LONG_INT_TRAILER: u8 = 15;
 
@@ -181,8 +180,7 @@ fn write_int(w: &mut impl Write, i: i64) -> io::Result<()> {
 }
 
 fn write_usize(w: &mut impl Write, i: usize) -> io::Result<()> {
-    // TODO: Longer than 127 characters
-    w.write_all(&[(i << 1) as u8])
+    write_int(w, i as i64)
 }
 
 fn write_bytes(w: &mut impl Write, b: &[u8]) -> io::Result<()> {
@@ -281,7 +279,7 @@ mod tests {
             TAG_EXPR_STMT,
             TAG_CALL_EXPR,
             TAG_NAME_EXPR,
-            10,
+            int_val(5),
             b'p',
             b'r',
             b'i',
@@ -293,7 +291,7 @@ mod tests {
             int_val(6),
             int_val(1),
             TAG_STR_EXPR,
-            10,
+            int_val(5),
             b'h',
             b'e',
             b'l',
