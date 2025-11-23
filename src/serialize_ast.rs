@@ -159,6 +159,7 @@ impl Ser for ast::Expr {
                 write_tag(w, TAG_CALL_EXPR)?;
                 c.func.serialize(w, state, l, text)?;
                 let args = &c.arguments;
+                write_tag(w, TAG_LIST_GEN)?;
                 write_int(w, args.len() as i64)?;
                 for arg in &args.args {
                     arg.serialize(w, state, l, text)?;
@@ -330,6 +331,7 @@ mod tests {
             int_val(0),
             int_val(6),
             TAG_END,
+            TAG_LIST_GEN,
             int_val(1),
             TAG_STR_EXPR,
             TAG_LITERAL_STR,
