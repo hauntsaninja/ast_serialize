@@ -112,16 +112,18 @@ impl Ser for ast::Stmt {
     fn serialize<W: Write>(&self, w: &mut W, state: &mut State, l: &LineIndex, text: &str) -> io::Result<()> {
         match self {
             ast::Stmt::Expr(e) => {
-                w.write_all(&[TAG_EXPR_STMT])?;
+                write_tag(w, TAG_EXPR_STMT)?;
                 e.value.serialize(w, state, l, text)?;
+                write_end_tag(w)?;
             }
             ast::Stmt::Import(i) => {
-                w.write_all(&[TAG_IMPORT])?;
+                write_tag(w, TAG_IMPORT)?;
                 for name in &i.names {
                     write_bytes(w, name.name.as_bytes())?;
                     state.imports.push(Import { name: name.name.to_string(), relative: 0, as_name: None});
                 }
-                write_location(w, l, text, i.range())?;                
+                write_location(w, l, text, i.range())?;
+                write_end_tag(w)?;
             }
             _ => {
                 panic!("unsupported: {self:?}");
@@ -140,6 +142,7 @@ impl Ser for ast::Expr {
                 write_tag(w, TAG_NAME_EXPR)?;
                 write_bytes(w, n.id.as_bytes())?;
                 write_loc(w, n.range())?;
+                write_end_tag(w)?;
             }
             ast::Expr::StringLiteral(s) => {
                 write_tag(w, TAG_STR_EXPR)?;
@@ -150,6 +153,7 @@ impl Ser for ast::Expr {
                     w.write(part.as_bytes())?;
                 }
                 write_loc(w, s.range())?;
+                write_end_tag(w)?;
             }
             ast::Expr::Call(c) => {
                 write_tag(w, TAG_CALL_EXPR)?;
@@ -164,6 +168,7 @@ impl Ser for ast::Expr {
                     panic!("unsupported: {:?}", args.keywords);
                 }
                 write_loc(w, c.range())?;
+                write_end_tag(w)?;
             }
             _ => {
                 panic!("unsupported: {self:?}");
@@ -203,6 +208,12 @@ fn write_int(w: &mut impl Write, i: i64) -> io::Result<()> {
 #[inline]
 fn write_tag(w: &mut impl Write, i: u8) -> io::Result<()> {
     w.write_all(&[i])
+
+}
+
+#[inline]
+fn write_end_tag(w: &mut impl Write) -> io::Result<()> {
+    write_tag(w, TAG_END)
 }
 
 #[inline]
@@ -318,6 +329,7 @@ mod tests {
             int_val(1),
             int_val(0),
             int_val(6),
+            TAG_END,
             int_val(1),
             TAG_STR_EXPR,
             TAG_LITERAL_STR,
@@ -331,10 +343,13 @@ mod tests {
             int_val(7),
             int_val(0),
             int_val(14),
+            TAG_END,
             int_val(1),
             int_val(1),
             int_val(0),
             int_val(15),
+            TAG_END,
+            TAG_END,
         ];
 
         assert_eq!(v, expected);
