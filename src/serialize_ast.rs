@@ -12,11 +12,31 @@ use ruff_python_parser::{ParseOptions, parse};
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange};
 
-const TAG_EXPR_STMT: u8 = 11;
-const TAG_CALL_EXPR: u8 = 12;
-const TAG_NAME_EXPR: u8 = 13;
-const TAG_STR_EXPR: u8 = 14;
-const TAG_IMPORT: u8 = 15;
+// Fixed tags for primitive types (must match mypy/cache.py)
+const TAG_LITERAL_FALSE: u8   = 0;
+const TAG_LITERAL_TRUE: u8    = 1;
+const TAG_LITERAL_NONE: u8    = 2;
+const TAG_LITERAL_INT: u8     = 3;
+const TAG_LITERAL_STR: u8     = 4;
+const TAG_LITERAL_BYTES: u8   = 5;
+const TAG_LITERAL_FLOAT: u8   = 6;
+const TAG_LITERAL_COMPLEX: u8 = 7;
+
+// Fixed tags for collections (must match mypy/cache.py)
+const TAG_LIST_GEN: u8      = 20;
+const TAG_LIST_INT: u8      = 21;
+const TAG_LIST_STR: u8      = 22;
+const TAG_LIST_BYTES: u8    = 23;
+const TAG_DICT_STR_GEN: u8  = 30;
+
+// End tag for composite objects
+const TAG_END: u8 = 255;
+
+const TAG_EXPR_STMT: u8 = 150;
+const TAG_CALL_EXPR: u8 = 151;
+const TAG_NAME_EXPR: u8 = 152;
+const TAG_STR_EXPR: u8 = 153;
+const TAG_IMPORT: u8 = 154;
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
@@ -117,13 +137,14 @@ impl Ser for ast::Expr {
 
         match self {
             ast::Expr::Name(n) => {
-                w.write_all(&[TAG_NAME_EXPR])?;
+                write_tag(w, TAG_NAME_EXPR)?;
                 write_bytes(w, n.id.as_bytes())?;
                 write_loc(w, n.range())?;
             }
             ast::Expr::StringLiteral(s) => {
-                w.write_all(&[TAG_STR_EXPR])?;
+                write_tag(w, TAG_STR_EXPR)?;
                 let value = &s.value;
+                write_tag(w, TAG_LITERAL_STR)?;
                 write_usize(w, value.len())?;
                 for part in value.iter() {
                     w.write(part.as_bytes())?;
@@ -131,7 +152,7 @@ impl Ser for ast::Expr {
                 write_loc(w, s.range())?;
             }
             ast::Expr::Call(c) => {
-                w.write_all(&[TAG_CALL_EXPR])?;
+                write_tag(w, TAG_CALL_EXPR)?;
                 c.func.serialize(w, state, l, text)?;
                 let args = &c.arguments;
                 write_int(w, args.len() as i64)?;
@@ -179,11 +200,18 @@ fn write_int(w: &mut impl Write, i: i64) -> io::Result<()> {
     }
 }
 
+#[inline]
+fn write_tag(w: &mut impl Write, i: u8) -> io::Result<()> {
+    w.write_all(&[i])
+}
+
+#[inline]
 fn write_usize(w: &mut impl Write, i: usize) -> io::Result<()> {
     write_int(w, i as i64)
 }
 
 fn write_bytes(w: &mut impl Write, b: &[u8]) -> io::Result<()> {
+    write_tag(w, TAG_LITERAL_STR)?;
     write_usize(w, b.len())?;
     w.write_all(b)
 }
@@ -279,6 +307,7 @@ mod tests {
             TAG_EXPR_STMT,
             TAG_CALL_EXPR,
             TAG_NAME_EXPR,
+            TAG_LITERAL_STR,
             int_val(5),
             b'p',
             b'r',
@@ -291,6 +320,7 @@ mod tests {
             int_val(6),
             int_val(1),
             TAG_STR_EXPR,
+            TAG_LITERAL_STR,
             int_val(5),
             b'h',
             b'e',
