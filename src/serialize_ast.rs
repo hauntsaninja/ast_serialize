@@ -39,6 +39,11 @@ const TAG_NAME_EXPR: u8 = 162;
 const TAG_STR_EXPR: u8 = 163;
 const TAG_IMPORT: u8 = 164;
 const TAG_MEMBER_EXPR: u8 = 165;
+const TAG_OP_EXPR: u8 = 166;
+const TAG_INT_EXPR: u8 = 167;
+const TAG_IF: u8 = 168;
+const TAG_ASSIGN: u8 = 169;
+const TAG_TUPLE_EXPR: u8 = 170;
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
@@ -175,6 +180,12 @@ impl Ser for ast::Expr {
                     panic!("unsupported: {:?}", args.keywords);
                 }
                 write_loc(w, c.range())?;
+            }
+            ast::Expr::BinOp(b) => {
+                write_tag(w, TAG_OP_EXPR)?;
+                w.write_all(&[b.op as u8])?;
+                b.left.serialize(w, state, l, text)?;
+                b.right.serialize(w, state, l, text)?;
             }
             _ => {
                 panic!("unsupported: {self:?}");
