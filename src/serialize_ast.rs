@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use ruff_linter::source_kind::SourceKind;
-use ruff_python_ast::PySourceType;
+use ruff_python_ast::{PySourceType, Number};
 use ruff_python_ast::{self as ast};
 use ruff_python_parser::{ParseOptions, parse};
 use ruff_source_file::LineIndex;
@@ -186,6 +186,24 @@ impl Ser for ast::Expr {
                 w.write_all(&[b.op as u8])?;
                 b.left.serialize(w, state, l, text)?;
                 b.right.serialize(w, state, l, text)?;
+            }
+            ast::Expr::NumberLiteral(n) => {
+                match &n.value {
+                    Number::Int(n) => {
+                        match n.as_i64() {
+                            Some(x) => {
+                                write_tag(w, TAG_INT_EXPR)?;
+                                write_tagged_int(w, x)?;
+                            }
+                            _ => {
+                                panic!("unsupported big int: {self:?}");
+                            }
+                        }
+                    }
+                    _ => {
+                        panic!("unsupported number: {self:?}");
+                    }
+                }
             }
             _ => {
                 panic!("unsupported: {self:?}");
