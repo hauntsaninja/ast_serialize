@@ -44,6 +44,7 @@ const TAG_INT_EXPR: u8 = 167;
 const TAG_IF: u8 = 168;
 const TAG_ASSIGN: u8 = 169;
 const TAG_TUPLE_EXPR: u8 = 170;
+const TAG_BLOCK: u8 = 171;
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
@@ -121,7 +122,6 @@ impl Ser for ast::Stmt {
             ast::Stmt::Expr(e) => {
                 write_tag(w, TAG_EXPR_STMT)?;
                 e.value.serialize(w, state, l, text)?;
-                write_end_tag(w)?;
             }
             ast::Stmt::Import(i) => {
                 write_tag(w, TAG_IMPORT)?;
@@ -130,13 +130,29 @@ impl Ser for ast::Stmt {
                     state.imports.push(Import { name: name.name.to_string(), relative: 0, as_name: None});
                 }
                 write_location(w, l, text, i.range())?;
-                write_end_tag(w)?;
+            }
+            ast::Stmt::If(s) => {
+                write_tag(w, TAG_IF)?;
+                s.test.serialize(w, state, l, text)?;
+                serialize_block(w, state, l, text, &s.body)?;
+                write_usize(w, s.elif_else_clauses.len())?;
+                for ee in &s.elif_else_clauses {
+                    match &ee.test {
+                        Some(e) => {
+                            e.serialize(w, state, l, text)?;
+                            serialize_block(w, state, l, text, &ee.body)?;
+                        }
+                        None => {
+                            serialize_block(w, state, l, text, &ee.body)?;
+                        }
+                    }
+                }
             }
             _ => {
                 panic!("unsupported: {self:?}");
             }
         };
-        Ok(())
+        write_end_tag(w)
     }
 }
 
@@ -211,6 +227,16 @@ impl Ser for ast::Expr {
         };
         write_end_tag(w)
     }
+}
+
+fn serialize_block(w: &mut impl Write, state: &mut State, l: &LineIndex, text: &str, block: &Vec<ast::Stmt>) -> io::Result<()> {
+    write_tag(w, TAG_BLOCK)?;
+    write_usize(w, block.len())?;
+    for stmt in block {
+        stmt.serialize(w, state, l, text)?;
+    }
+    write_end_tag(w)?;
+    Ok(())
 }
 
 #[inline]
