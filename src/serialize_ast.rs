@@ -297,6 +297,13 @@ impl Ser for ast::Expr {
                     }
                 }
             }
+            ast::Expr::Tuple(t) => {
+                ser.write_tag(TAG_TUPLE_EXPR);
+                ser.write_usize(t.elts.len());
+                for item in &t.elts {
+                    item.serialize(ser);
+                }
+            }
             _ => {
                 panic!("unsupported: {self:?}");
             }
