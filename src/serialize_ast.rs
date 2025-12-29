@@ -215,6 +215,7 @@ impl Ser for ast::Stmt {
                 ser.write_tag(TAG_ASSIGN);
                 a.targets.serialize(ser);
                 a.value.serialize(ser);
+                ser.write_location(a.range());
             }
             ast::Stmt::Import(i) => {
                 ser.write_tag(TAG_IMPORT);
@@ -290,12 +291,12 @@ impl Ser for ast::Expr {
             }
             ast::Expr::BinOp(b) => {
                 ser.write_tag(TAG_OP_EXPR);
-                ser.bytes.push(b.op as u8);
+                ser.write_tagged_int(b.op as i64);
                 b.left.serialize(ser);
                 b.right.serialize(ser);
             }
-            ast::Expr::NumberLiteral(n) => {
-                match &n.value {
+            ast::Expr::NumberLiteral(num) => {
+                match &num.value {
                     Number::Int(n) => {
                         match n.as_i64() {
                             Some(x) => {
@@ -311,6 +312,7 @@ impl Ser for ast::Expr {
                         panic!("unsupported number: {self:?}");
                     }
                 }
+                ser.write_location(num.range());
             }
             ast::Expr::Tuple(t) => {
                 ser.write_tag(TAG_TUPLE_EXPR);
