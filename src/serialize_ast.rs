@@ -136,6 +136,15 @@ impl<'a> Serializer<'a> {
         write_int(&mut self.bytes, (end_loc.line.get() as i64) - st_line);
         write_int(&mut self.bytes, (end_loc.column.get() as i64) - st_column);
     }
+
+    fn serialize_block(&mut self, block: &Vec<ast::Stmt>) {
+        self.write_tag(TAG_BLOCK);
+        self.write_usize(block.len());
+        for stmt in block {
+            stmt.serialize(self);
+        }
+        self.write_end_tag();
+    }
 }
 
 trait Ser {
@@ -176,16 +185,16 @@ impl Ser for ast::Stmt {
             ast::Stmt::If(s) => {
                 ser.write_tag(TAG_IF);
                 s.test.serialize(ser);
-                serialize_block(ser, &s.body);
+                ser.serialize_block(&s.body);
                 ser.write_usize(s.elif_else_clauses.len());
                 for ee in &s.elif_else_clauses {
                     match &ee.test {
                         Some(e) => {
                             e.serialize(ser);
-                            serialize_block(ser, &ee.body);
+                            ser.serialize_block(&ee.body);
                         }
                         None => {
-                            serialize_block(ser, &ee.body);
+                            ser.serialize_block(&ee.body);
                         }
                     }
                 }
@@ -267,15 +276,6 @@ impl Ser for ast::Expr {
         };
         ser.write_end_tag()
     }
-}
-
-fn serialize_block(ser: &mut Serializer, block: &Vec<ast::Stmt>) {
-    ser.write_tag(TAG_BLOCK);
-    ser.write_usize(block.len());
-    for stmt in block {
-        stmt.serialize(ser);
-    }
-    ser.write_end_tag();
 }
 
 fn write_int(w: &mut Vec<u8>, i: i64) {
