@@ -125,6 +125,10 @@ impl<'a> Serializer<'a> {
         self.bytes.extend_from_slice(b);
     }
 
+    fn write_bool(&mut self, b: bool) {
+        self.bytes.push(if b { TAG_LITERAL_TRUE } else { TAG_LITERAL_FALSE });
+    }
+
     fn write_int(&mut self, i: i64) {
         if i >= MIN_SHORT_INT && i < 128 + MIN_SHORT_INT {
             // 1-byte format
@@ -166,6 +170,7 @@ impl<'a> Serializer<'a> {
 
     fn serialize_block(&mut self, block: &Vec<ast::Stmt>) {
         self.write_tag(TAG_BLOCK);
+        self.write_tag(TAG_LIST_GEN);
         self.write_usize(block.len());
         for stmt in block {
             stmt.serialize(self);
@@ -229,7 +234,9 @@ impl Ser for ast::Stmt {
                 ser.write_tag(TAG_IF);
                 s.test.serialize(ser);
                 ser.serialize_block(&s.body);
-                ser.write_usize(s.elif_else_clauses.len());
+                let has_else = s.elif_else_clauses.last().is_some_and(|v| v.test.is_none());
+                let num_elif = s.elif_else_clauses.len() - if has_else { 1 } else { 0 };
+                ser.write_tagged_int(num_elif as i64);
                 for ee in &s.elif_else_clauses {
                     match &ee.test {
                         Some(e) => {
@@ -237,10 +244,15 @@ impl Ser for ast::Stmt {
                             ser.serialize_block(&ee.body);
                         }
                         None => {
+                            ser.write_bool(true);
                             ser.serialize_block(&ee.body);
                         }
                     }
                 }
+                if !has_else {
+                    ser.write_bool(false);
+                }
+                ser.write_location(s.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
