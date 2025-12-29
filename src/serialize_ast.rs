@@ -314,10 +314,8 @@ impl Ser for ast::Expr {
             }
             ast::Expr::Tuple(t) => {
                 ser.write_tag(TAG_TUPLE_EXPR);
-                ser.write_usize(t.elts.len());
-                for item in &t.elts {
-                    item.serialize(ser);
-                }
+                t.elts.serialize(ser);
+                ser.write_location(t.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
