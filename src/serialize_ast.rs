@@ -124,6 +124,18 @@ impl<'a> Serializer<'a> {
         self.write_usize(b.len());
         self.bytes.extend_from_slice(b);
     }
+
+    fn write_location(&mut self, range: TextRange) {
+        self.write_tag(TAG_LOCATION);
+        let st_loc = self.line_index.line_column(range.start(), self.text);
+        let st_line = st_loc.line.get() as i64;
+        let st_column = st_loc.column.get() as i64;
+        write_int(&mut self.bytes, st_line);
+        write_int(&mut self.bytes, st_column);
+        let end_loc = self.line_index.line_column(range.end(), self.text);
+        write_int(&mut self.bytes, (end_loc.line.get() as i64) - st_line);
+        write_int(&mut self.bytes, (end_loc.column.get() as i64) - st_column);
+    }
 }
 
 trait Ser {
@@ -159,7 +171,7 @@ impl Ser for ast::Stmt {
                     ser.write_bytes(name.name.as_bytes());
                     ser.imports.push(Import { name: name.name.to_string(), relative: 0, as_name: None});
                 }
-                write_location(ser, i.range());
+                ser.write_location(i.range());
             }
             ast::Stmt::If(s) => {
                 ser.write_tag(TAG_IF);
@@ -192,13 +204,13 @@ impl Ser for ast::Expr {
             ast::Expr::Name(n) => {
                 ser.write_tag(TAG_NAME_EXPR);
                 ser.write_bytes(n.id.as_bytes());
-                write_location(ser, n.range());
+                ser.write_location(n.range());
             }
             ast::Expr::Attribute(a) => {
                 ser.write_tag(TAG_MEMBER_EXPR);
                 a.value.serialize(ser);
                 ser.write_bytes(a.attr.as_bytes());
-                write_location(ser, a.range());
+                ser.write_location(a.range());
             }
             ast::Expr::StringLiteral(s) => {
                 ser.write_tag(TAG_STR_EXPR);
@@ -208,7 +220,7 @@ impl Ser for ast::Expr {
                 for part in value.iter() {
                     ser.bytes.extend_from_slice(part.as_bytes());
                 }
-                write_location(ser, s.range());
+                ser.write_location(s.range());
             }
             ast::Expr::Call(c) => {
                 ser.write_tag(TAG_CALL_EXPR);
@@ -223,7 +235,7 @@ impl Ser for ast::Expr {
                     // TODO: Keywords
                     panic!("unsupported: {:?}", args.keywords);
                 }
-                write_location(ser, c.range());
+                ser.write_location(c.range());
             }
             ast::Expr::BinOp(b) => {
                 ser.write_tag(TAG_OP_EXPR);
@@ -291,18 +303,6 @@ fn write_int(w: &mut Vec<u8>, i: i64) {
         write_int(w, ((n as i64) << 1) | (neg as i64));
         w.extend_from_slice(&bytes[..n]);
     }
-}
-
-fn write_location(ser: &mut Serializer, range: TextRange) {
-    ser.write_tag(TAG_LOCATION);
-    let st_loc = ser.line_index.line_column(range.start(), ser.text);
-    let st_line = st_loc.line.get() as i64;
-    let st_column = st_loc.column.get() as i64;
-    write_int(&mut ser.bytes, st_line);
-    write_int(&mut ser.bytes, st_column);
-    let end_loc = ser.line_index.line_column(range.end(), ser.text);
-    write_int(&mut ser.bytes, (end_loc.line.get() as i64) - st_line);
-    write_int(&mut ser.bytes, (end_loc.column.get() as i64) - st_column);
 }
 
 #[cfg(test)]
