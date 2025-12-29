@@ -76,7 +76,7 @@ pub(crate) fn main(args: &Args) -> Result<()> {
         parse(source_kind.source_code(), ParseOptions::from(source_type))?.into_syntax();
     let _ = start.elapsed();
     let line_index = LineIndex::from_source_text(source_kind.source_code());
-    let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: &line_index, text: source_kind.source_code() };
+    let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: line_index, text: source_kind.source_code() };
     python_ast.serialize(&mut ser);
 
     io::stdout().write_all(&ser.bytes)?;
@@ -93,7 +93,7 @@ struct Import {
 struct Serializer<'a> {
     bytes: Vec<u8>,
     imports: Vec<Import>,
-    line_index: & 'a LineIndex,
+    line_index: LineIndex,
     text: & 'a str
 }
 
@@ -111,12 +111,12 @@ impl<'a> Serializer<'a> {
     #[inline]
     fn write_tagged_int(&mut self, i: i64) {
         self.write_tag(TAG_LITERAL_INT);
-        write_int(&mut self.bytes, i);
+        self.write_int(i);
     }
 
     #[inline]
     fn write_usize(&mut self, i: usize) {
-        write_int(&mut self.bytes, i as i64);
+        self.write_int(i as i64);
     }
 
     fn write_bytes(&mut self, b: &[u8]) {
@@ -125,16 +125,43 @@ impl<'a> Serializer<'a> {
         self.bytes.extend_from_slice(b);
     }
 
+    fn write_int(&mut self, i: i64) {
+        if i >= MIN_SHORT_INT && i < 128 + MIN_SHORT_INT {
+            // 1-byte format
+            self.bytes.push(((i - MIN_SHORT_INT) << 1) as u8);
+        } else if i >= MIN_TWO_BYTES_INT && i <= MAX_TWO_BYTES_INT {
+            // 2-byte format
+            let x: u16 = (((i - MIN_TWO_BYTES_INT) << 2) | TWO_BYTES_INT_BIT) as u16;
+            self.bytes.extend_from_slice(&x.to_le_bytes());
+        } else if i >= MIN_FOUR_BYTES_INT && i <= MAX_FOUR_BYTES_INT {
+            // 4-byte format
+            let x: u32 = (((i - MIN_FOUR_BYTES_INT) << 3) | FOUR_BYTES_INT_TRAILER) as u32;
+            self.bytes.extend_from_slice(&x.to_le_bytes());
+        } else {
+            // Variable-length format
+            self.bytes.push(LONG_INT_TRAILER);
+            let neg = i < 0;
+            let absval = if neg { i.wrapping_abs() as u64 } else { i as u64 };
+            let bytes = absval.to_le_bytes();
+            let mut n = bytes.len();
+            while n > 1 && bytes[n - 1] == 0 {
+                n -= 1;
+            }
+            self.write_int(((n as i64) << 1) | (neg as i64));
+            self.bytes.extend_from_slice(&bytes[..n]);
+        }
+    }
+
     fn write_location(&mut self, range: TextRange) {
         self.write_tag(TAG_LOCATION);
         let st_loc = self.line_index.line_column(range.start(), self.text);
         let st_line = st_loc.line.get() as i64;
         let st_column = st_loc.column.get() as i64;
-        write_int(&mut self.bytes, st_line);
-        write_int(&mut self.bytes, st_column);
+        self.write_int(st_line);
+        self.write_int(st_column);
         let end_loc = self.line_index.line_column(range.end(), self.text);
-        write_int(&mut self.bytes, (end_loc.line.get() as i64) - st_line);
-        write_int(&mut self.bytes, (end_loc.column.get() as i64) - st_column);
+        self.write_int((end_loc.line.get() as i64) - st_line);
+        self.write_int((end_loc.column.get() as i64) - st_column);
     }
 
     fn serialize_block(&mut self, block: &Vec<ast::Stmt>) {
@@ -236,7 +263,7 @@ impl Ser for ast::Expr {
                 c.func.serialize(ser);
                 let args = &c.arguments;
                 ser.write_tag(TAG_LIST_GEN);
-                write_int(&mut ser.bytes, args.len() as i64);
+                ser.write_int(args.len() as i64);
                 for arg in &args.args {
                     arg.serialize(ser);
                 }
@@ -278,33 +305,6 @@ impl Ser for ast::Expr {
     }
 }
 
-fn write_int(w: &mut Vec<u8>, i: i64) {
-    if i >= MIN_SHORT_INT && i < 128 + MIN_SHORT_INT {
-        // 1-byte format
-        w.push(((i - MIN_SHORT_INT) << 1) as u8);
-    } else if i >= MIN_TWO_BYTES_INT && i <= MAX_TWO_BYTES_INT {
-        // 2-byte format
-        let x: u16 = (((i - MIN_TWO_BYTES_INT) << 2) | TWO_BYTES_INT_BIT) as u16;
-        w.extend_from_slice(&x.to_le_bytes());
-    } else if i >= MIN_FOUR_BYTES_INT && i <= MAX_FOUR_BYTES_INT {
-        // 4-byte format
-        let x: u32 = (((i - MIN_FOUR_BYTES_INT) << 3) | FOUR_BYTES_INT_TRAILER) as u32;
-        w.extend_from_slice(&x.to_le_bytes());
-    } else {
-        // Variable-length format
-        w.push(LONG_INT_TRAILER);
-        let neg = i < 0;
-        let absval = if neg { i.wrapping_abs() as u64 } else { i as u64 };
-        let bytes = absval.to_le_bytes();
-        let mut n = bytes.len();
-        while n > 1 && bytes[n - 1] == 0 {
-            n -= 1;
-        }
-        write_int(w, ((n as i64) << 1) | (neg as i64));
-        w.extend_from_slice(&bytes[..n]);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,62 +313,67 @@ mod tests {
         return ((x - MIN_SHORT_INT) << 1) as u8;
     }
 
+    fn make_ser<'a>(text: &'a str) -> Serializer<'a> {
+        let index = LineIndex::from_source_text(text);
+        Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: index, text: text }
+    }
+
     #[test]
     fn test_write_short_int() {
         for x in [-10, -1, 0, 1, 117] {
-            let mut v: Vec<u8> = Vec::new();
-            write_int(&mut v, x);
-            assert_eq!(v, &[((x - MIN_SHORT_INT) << 1) as u8]);
+            let mut ser = make_ser("");
+            ser.write_int(x);
+            assert_eq!(ser.bytes, &[((x - MIN_SHORT_INT) << 1) as u8]);
         }
     }
 
     #[test]
     fn test_write_2_byte_int() {
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, 118);
-        assert_eq!(v, &[105, 3]);
+        let mut ser = make_ser("");
+        ser.write_int(118);
+        assert_eq!(ser.bytes, &[105, 3]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, -11);
-        assert_eq!(v, &[101, 1]);
+        let mut ser = make_ser("");
+        ser.write_int(-11);
+        assert_eq!(ser.bytes, &[101, 1]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, -100);
-        assert_eq!(v, &[1, 0]);
+        let mut ser = make_ser("");
+        ser.write_int(-100);
+        assert_eq!(ser.bytes, &[1, 0]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, 16283);
-        assert_eq!(v, &[253, 255]);
+        let mut ser = make_ser("");
+        ser.write_int(16283);
+        assert_eq!(ser.bytes, &[253, 255]);
     }
 
     #[test]
     fn test_write_4_byte_int() {
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, -101);
-        assert_eq!(v, &[91, 53, 1, 0]);
+        let mut ser = make_ser("");
+        ser.write_int(-101);
+        assert_eq!(ser.bytes, &[91, 53, 1, 0]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, 16284);
-        assert_eq!(v, &[99, 53, 3, 0]);
+        let mut ser = make_ser("");
+        ser.write_int(16284);
+        assert_eq!(ser.bytes, &[99, 53, 3, 0]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, -10000);
-        assert_eq!(v, &[3, 0, 0, 0]);
+        let mut ser = make_ser("");
+        ser.write_int(-10000);
+        assert_eq!(ser.bytes, &[3, 0, 0, 0]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, 536860911);
-        assert_eq!(v, &[251, 255, 255, 255]);
+        let mut ser = make_ser("");
+        ser.write_int(536860911);
+        assert_eq!(ser.bytes, &[251, 255, 255, 255]);
     }
 
     #[test]
     fn test_write_long_int() {
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, -10001);
-        assert_eq!(v, &[15, 30, 17, 39]);
+        let mut ser = make_ser("");
+        ser.write_int(-10001);
+        assert_eq!(ser.bytes, &[15, 30, 17, 39]);
 
-        let mut v: Vec<u8> = Vec::new();
-        write_int(&mut v, 536860912);
-        assert_eq!(v, &[15, 36, 240, 216, 255, 31]);
+        let mut ser = make_ser("");
+        ser.write_int(536860912);
+        assert_eq!(ser.bytes, &[15, 36, 240, 216, 255, 31]);
     }
 
     #[test]
@@ -377,7 +382,7 @@ mod tests {
         let text = "print('hello')";
         let ast = parse(text, opt).unwrap().into_syntax();
         let index = LineIndex::from_source_text(text);
-        let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: &index, text: text };
+        let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: index, text: text };
         ast.serialize(&mut ser);
         let _ = ser;  // TODO: drop when not needed
 
