@@ -50,6 +50,8 @@ const TAG_LIST_EXPR: u8 = 173;
 const TAG_SET_EXPR: u8 = 174;
 const TAG_RETURN: u8 = 175;
 const TAG_WHILE: u8 = 176;
+const TAG_COMPARISON_EXPR: u8 = 177;
+const TAG_BOOL_OP_EXPR: u8 = 178;
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
@@ -189,6 +191,16 @@ trait Ser {
 }
 
 impl Ser for Vec<ast::Expr> {
+    fn serialize(&self, ser: &mut Serializer) {
+        ser.write_tag(TAG_LIST_GEN);
+        ser.write_int(self.len() as i64);
+        for e in self {
+            e.serialize(ser);
+        }
+    }
+}
+
+impl Ser for [ast::Expr] {
     fn serialize(&self, ser: &mut Serializer) {
         ser.write_tag(TAG_LIST_GEN);
         ser.write_int(self.len() as i64);
@@ -373,6 +385,39 @@ impl Ser for ast::Expr {
             ast::Expr::Set(e) => {
                 ser.write_tag(TAG_SET_EXPR);
                 e.elts.serialize(ser);
+                ser.write_location(e.range());
+            }
+            ast::Expr::BoolOp(e) => {
+                ser.write_tag(TAG_BOOL_OP_EXPR);
+                ser.write_tagged_int(match e.op {
+                    ast::BoolOp::And => 0,
+                    ast::BoolOp::Or => 1,
+                });
+                e.values.serialize(ser);
+                ser.write_location(e.range());
+            }
+            ast::Expr::Compare(e) => {
+                ser.write_tag(TAG_COMPARISON_EXPR);
+                e.left.serialize(ser);
+                // Serialize operators
+                ser.write_tag(TAG_LIST_INT);
+                ser.write_usize(e.ops.len());
+                for op in &e.ops {
+                    ser.write_int(match op {
+                        ast::CmpOp::Eq => 0,
+                        ast::CmpOp::NotEq => 1,
+                        ast::CmpOp::Lt => 2,
+                        ast::CmpOp::LtE => 3,
+                        ast::CmpOp::Gt => 4,
+                        ast::CmpOp::GtE => 5,
+                        ast::CmpOp::Is => 6,
+                        ast::CmpOp::IsNot => 7,
+                        ast::CmpOp::In => 8,
+                        ast::CmpOp::NotIn => 9,
+                    });
+                }
+                // Serialize comparators
+                e.comparators.serialize(ser);
                 ser.write_location(e.range());
             }
             _ => {
