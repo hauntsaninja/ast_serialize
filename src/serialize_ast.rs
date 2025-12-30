@@ -422,9 +422,16 @@ impl Ser for ast::Stmt {
                 // Body
                 ser.serialize_block(&c.body);
 
-                // TODO: Base classes (skip for now)
+                // Base classes (positional arguments in class definition)
                 ser.write_tag(TAG_LIST_GEN);
-                ser.write_int(0); // Empty base class list
+                if let Some(args) = &c.arguments {
+                    ser.write_int(args.args.len() as i64);
+                    for base in &args.args {
+                        base.serialize(ser);
+                    }
+                } else {
+                    ser.write_int(0); // No base classes
+                }
 
                 // TODO: Decorators (skip for now)
                 ser.write_tag(TAG_LIST_GEN);
