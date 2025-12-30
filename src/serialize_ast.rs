@@ -420,6 +420,18 @@ impl Ser for ast::Expr {
                 e.comparators.serialize(ser);
                 ser.write_location(e.range());
             }
+            ast::Expr::BooleanLiteral(b) => {
+                // Serialize as NameExpr with "True" or "False"
+                ser.write_tag(TAG_NAME_EXPR);
+                ser.write_bytes(if b.value { b"True" } else { b"False" });
+                ser.write_location(b.range());
+            }
+            ast::Expr::NoneLiteral(n) => {
+                // Serialize as NameExpr with "None"
+                ser.write_tag(TAG_NAME_EXPR);
+                ser.write_bytes(b"None");
+                ser.write_location(n.range());
+            }
             _ => {
                 panic!("unsupported: {self:?}");
             }
