@@ -266,34 +266,34 @@ fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
 
     // Serialize positional-only arguments
     for param in &params.posonlyargs {
-        serialize_argument(ser, &param.parameter, param.default.is_some(), ARG_POS, ARG_OPT, true);
+        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, true);
     }
 
     // Serialize regular positional arguments
     for param in &params.args {
-        serialize_argument(ser, &param.parameter, param.default.is_some(), ARG_POS, ARG_OPT, false);
+        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, false);
     }
 
     // Serialize *args
     if let Some(vararg) = &params.vararg {
-        serialize_argument(ser, vararg, false, ARG_STAR, ARG_STAR, false);
+        serialize_argument(ser, vararg, None, ARG_STAR, ARG_STAR, false);
     }
 
     // Serialize keyword-only arguments
     for param in &params.kwonlyargs {
-        serialize_argument(ser, &param.parameter, param.default.is_some(), ARG_NAMED, ARG_NAMED_OPT, false);
+        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_NAMED, ARG_NAMED_OPT, false);
     }
 
     // Serialize **kwargs
     if let Some(kwarg) = &params.kwarg {
-        serialize_argument(ser, kwarg, false, ARG_STAR2, ARG_STAR2, false);
+        serialize_argument(ser, kwarg, None, ARG_STAR2, ARG_STAR2, false);
     }
 }
 
 fn serialize_argument(
     ser: &mut Serializer,
     param: &ast::Parameter,
-    has_default: bool,
+    default_expr: Option<&ast::Expr>,
     kind_no_default: i64,
     kind_with_default: i64,
     pos_only: bool,
@@ -302,7 +302,7 @@ fn serialize_argument(
     ser.write_bytes(param.name.as_bytes());
 
     // Argument kind
-    let kind = if has_default {
+    let kind = if default_expr.is_some() {
         kind_with_default
     } else {
         kind_no_default
@@ -312,8 +312,13 @@ fn serialize_argument(
     // TODO: Type annotation (skip for now)
     ser.write_bool(false);
 
-    // TODO: Default value (skip for now)
-    ser.write_bool(false);
+    // Default value
+    if let Some(expr) = default_expr {
+        ser.write_bool(true);
+        expr.serialize(ser);
+    } else {
+        ser.write_bool(false);
+    }
 
     // pos_only flag
     ser.write_bool(pos_only);
