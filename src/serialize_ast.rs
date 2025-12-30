@@ -57,6 +57,7 @@ const TAG_PASS_STMT: u8 = 180;
 const TAG_CLASS_DEF: u8 = 60;
 const TAG_FLOAT_EXPR: u8 = 181;
 const TAG_UNARY_EXPR: u8 = 182;
+const TAG_DICT_EXPR: u8 = 183;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -639,6 +640,28 @@ impl Ser for ast::Expr {
                 // Serialize operand
                 u.operand.serialize(ser);
                 ser.write_location(u.range());
+            }
+            ast::Expr::Dict(d) => {
+                ser.write_tag(TAG_DICT_EXPR);
+                // Serialize keys
+                ser.write_tag(TAG_LIST_GEN);
+                ser.write_int(d.items.len() as i64);
+                for item in &d.items {
+                    if let Some(key) = &item.key {
+                        ser.write_bool(true);
+                        key.serialize(ser);
+                    } else {
+                        // Dict unpacking: {**other_dict}
+                        ser.write_bool(false);
+                    }
+                }
+                // Serialize values
+                ser.write_tag(TAG_LIST_GEN);
+                ser.write_int(d.items.len() as i64);
+                for item in &d.items {
+                    item.value.serialize(ser);
+                }
+                ser.write_location(d.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
