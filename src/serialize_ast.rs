@@ -45,6 +45,11 @@ const TAG_IF: u8 = 168;
 const TAG_ASSIGN: u8 = 169;
 const TAG_TUPLE_EXPR: u8 = 170;
 const TAG_BLOCK: u8 = 171;
+const TAG_INDEX: u8 = 172;
+const TAG_LIST_EXPR: u8 = 173;
+const TAG_SET_EXPR: u8 = 174;
+const TAG_RETURN: u8 = 175;
+const TAG_WHILE: u8 = 176;
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
@@ -193,6 +198,17 @@ impl Ser for Vec<ast::Expr> {
     }
 }
 
+impl Ser for Option<Box<ast::Expr>> {
+    fn serialize(&self, ser: &mut Serializer) {
+        if let Some(v) = &self {
+            ser.write_bool(true);
+            v.serialize(ser);
+        } else {
+            ser.write_bool(false);
+        }
+    }
+}
+
 impl Ser for ast::Mod {
     fn serialize(&self, ser: &mut Serializer) {
         match self {
@@ -230,6 +246,11 @@ impl Ser for ast::Stmt {
                 }
                 ser.write_location(i.range());
             }
+            ast::Stmt::Return(s) => {
+                ser.write_tag(TAG_RETURN);
+                s.value.serialize(ser);
+                ser.write_location(s.range());
+            }
             ast::Stmt::If(s) => {
                 ser.write_tag(TAG_IF);
                 s.test.serialize(ser);
@@ -252,6 +273,13 @@ impl Ser for ast::Stmt {
                 if !has_else {
                     ser.write_bool(false);
                 }
+                ser.write_location(s.range());
+            }
+            ast::Stmt::While(s) => {
+                ser.write_tag(TAG_WHILE);
+                s.test.serialize(ser);
+                ser.serialize_block(&s.body);
+                ser.serialize_block(&s.orelse);
                 ser.write_location(s.range());
             }
             _ => {
@@ -301,11 +329,11 @@ impl Ser for ast::Expr {
                 }
                 ser.write_location(c.range());
             }
-            ast::Expr::BinOp(b) => {
+            ast::Expr::BinOp(e) => {
                 ser.write_tag(TAG_OP_EXPR);
-                ser.write_tagged_int(b.op as i64);
-                b.left.serialize(ser);
-                b.right.serialize(ser);
+                ser.write_tagged_int(e.op as i64);
+                e.left.serialize(ser);
+                e.right.serialize(ser);
             }
             ast::Expr::NumberLiteral(num) => {
                 match &num.value {
@@ -326,10 +354,26 @@ impl Ser for ast::Expr {
                 }
                 ser.write_location(num.range());
             }
-            ast::Expr::Tuple(t) => {
+            ast::Expr::Subscript(e) => {
+                ser.write_tag(TAG_INDEX);
+                e.value.serialize(ser);
+                e.slice.serialize(ser);
+                ser.write_location(e.range());
+            }
+            ast::Expr::List(e) => {
+                ser.write_tag(TAG_LIST_EXPR);
+                e.elts.serialize(ser);
+                ser.write_location(e.range());
+            }
+            ast::Expr::Tuple(e) => {
                 ser.write_tag(TAG_TUPLE_EXPR);
-                t.elts.serialize(ser);
-                ser.write_location(t.range());
+                e.elts.serialize(ser);
+                ser.write_location(e.range());
+            }
+            ast::Expr::Set(e) => {
+                ser.write_tag(TAG_SET_EXPR);
+                e.elts.serialize(ser);
+                ser.write_location(e.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
