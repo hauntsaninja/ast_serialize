@@ -53,6 +53,7 @@ const TAG_WHILE: u8 = 176;
 const TAG_COMPARISON_EXPR: u8 = 177;
 const TAG_BOOL_OP_EXPR: u8 = 178;
 const TAG_FUNC_DEF: u8 = 179;
+const TAG_PASS_STMT: u8 = 180;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -400,6 +401,10 @@ impl Ser for ast::Stmt {
                 s.test.serialize(ser);
                 ser.serialize_block(&s.body);
                 ser.serialize_block(&s.orelse);
+                ser.write_location(s.range());
+            }
+            ast::Stmt::Pass(s) => {
+                ser.write_tag(TAG_PASS_STMT);
                 ser.write_location(s.range());
             }
             _ => {
