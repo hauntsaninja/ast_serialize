@@ -60,6 +60,7 @@ const TAG_UNARY_EXPR: u8 = 182;
 const TAG_DICT_EXPR: u8 = 183;
 const TAG_COMPLEX_EXPR: u8 = 184;
 const TAG_SLICE_EXPR: u8 = 185;
+const TAG_UNBOUND_TYPE: u8 = 104;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -330,6 +331,45 @@ fn serialize_argument(
     ser.write_bool(pos_only);
 }
 
+fn serialize_simple_unbound_type(ser: &mut Serializer, name: &[u8]) {
+    ser.write_tag(TAG_UNBOUND_TYPE);
+    ser.write_bytes(name);
+    ser.write_tag(TAG_LIST_GEN);
+    ser.write_int(0);
+    // Write None for original_str_expr (optional field)
+    ser.write_tag(TAG_LITERAL_NONE);
+    // Write None for original_str_fallback (optional field)
+    ser.write_tag(TAG_LITERAL_NONE);
+}
+
+fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
+    match t {
+        ast::Expr::Name(e) => {
+            serialize_simple_unbound_type(ser, e.id.as_bytes());
+        }
+        ast::Expr::Attribute(e) => {
+            // TODO
+            panic!("unimplemented");
+        }
+        ast::Expr::Subscript(e) => {
+            // TODO
+            panic!("unimplemented");
+        }
+        ast::Expr::NoneLiteral(_) => {
+            serialize_simple_unbound_type(ser, b"None");
+        }
+        ast::Expr::BinOp(e) => {
+            // TODO
+            panic!("unimplemented");
+        }
+        _ => {
+            panic!("unsupported type: {t:?}");
+        }
+    }
+    ser.write_location(t.range());
+    ser.write_end_tag();
+}
+
 impl Ser for ast::Stmt {
     fn serialize(&self, ser: &mut Serializer) {
         match self {
@@ -356,7 +396,12 @@ impl Ser for ast::Stmt {
                 ser.write_bool(false); // No type params
 
                 // TODO: Return type annotation (skip for now)
-                ser.write_bool(false); // No return annotation
+                if let Some(ret) = &f.returns {
+                    ser.write_bool(true); // No return annotation
+                    serialize_type(ser, ret);
+                } else {
+                    ser.write_bool(false); // No return annotation
+                }
 
                 ser.write_location(f.range());
             }
@@ -571,9 +616,6 @@ impl Ser for ast::Expr {
                         // Serialize imaginary part
                         ser.write_tag(TAG_LITERAL_FLOAT);
                         ser.bytes.extend_from_slice(&imag.to_le_bytes());
-                    }
-                    _ => {
-                        panic!("unsupported number: {self:?}");
                     }
                 }
                 ser.write_location(num.range());
