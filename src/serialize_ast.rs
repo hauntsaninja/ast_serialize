@@ -59,6 +59,7 @@ const TAG_FLOAT_EXPR: u8 = 181;
 const TAG_UNARY_EXPR: u8 = 182;
 const TAG_DICT_EXPR: u8 = 183;
 const TAG_COMPLEX_EXPR: u8 = 184;
+const TAG_SLICE_EXPR: u8 = 185;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -672,6 +673,16 @@ impl Ser for ast::Expr {
                     item.value.serialize(ser);
                 }
                 ser.write_location(d.range());
+            }
+            ast::Expr::Slice(s) => {
+                ser.write_tag(TAG_SLICE_EXPR);
+                // Serialize lower (begin_index in mypy)
+                s.lower.serialize(ser);
+                // Serialize upper (end_index in mypy)
+                s.upper.serialize(ser);
+                // Serialize step (stride in mypy)
+                s.step.serialize(ser);
+                ser.write_location(s.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
