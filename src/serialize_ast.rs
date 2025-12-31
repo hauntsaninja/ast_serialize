@@ -62,6 +62,8 @@ const TAG_COMPLEX_EXPR: u8 = 184;
 const TAG_SLICE_EXPR: u8 = 185;
 const TAG_TEMP_NODE: u8 = 186;
 const TAG_RAISE_STMT: u8 = 187;
+const TAG_BREAK_STMT: u8 = 188;
+const TAG_CONTINUE_STMT: u8 = 189;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 
@@ -571,6 +573,14 @@ impl Ser for ast::Stmt {
             }
             ast::Stmt::Pass(s) => {
                 ser.write_tag(TAG_PASS_STMT);
+                ser.write_location(s.range());
+            }
+            ast::Stmt::Break(s) => {
+                ser.write_tag(TAG_BREAK_STMT);
+                ser.write_location(s.range());
+            }
+            ast::Stmt::Continue(s) => {
+                ser.write_tag(TAG_CONTINUE_STMT);
                 ser.write_location(s.range());
             }
             ast::Stmt::ClassDef(c) => {
