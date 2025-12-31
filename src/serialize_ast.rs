@@ -316,8 +316,12 @@ fn serialize_argument(
     };
     ser.write_tagged_int(kind);
 
-    // TODO: Type annotation (skip for now)
-    ser.write_bool(false);
+    if let Some(ann) = &param.annotation {
+        ser.write_bool(true);
+        serialize_type(ser, ann);
+    } else {
+        ser.write_bool(false);
+    }
 
     // Default value
     if let Some(expr) = default_expr {
