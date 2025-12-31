@@ -67,6 +67,8 @@ const TAG_CONTINUE_STMT: u8 = 189;
 const TAG_GENERATOR_EXPR: u8 = 190;
 const TAG_YIELD_EXPR: u8 = 191;
 const TAG_YIELD_FROM_EXPR: u8 = 192;
+const TAG_LIST_COMPREHENSION: u8 = 193;
+const TAG_SET_COMPREHENSION: u8 = 194;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 
@@ -261,6 +263,36 @@ impl Ser for ast::Mod {
             }
         }
     }
+}
+
+/// Helper function to serialize comprehensions (shared by Generator, ListComp, SetComp)
+fn serialize_comprehension(
+    ser: &mut Serializer,
+    elt: &ast::Expr,
+    generators: &[ast::Comprehension],
+    range: ruff_text_size::TextRange,
+) {
+    // Serialize element expression
+    elt.serialize(ser);
+    // Serialize number of generators
+    ser.write_tagged_int(generators.len() as i64);
+    // Serialize all indices (targets)
+    for comp in generators {
+        comp.target.serialize(ser);
+    }
+    // Serialize all sequences (iters)
+    for comp in generators {
+        comp.iter.serialize(ser);
+    }
+    // Serialize all condlists (ifs for each generator)
+    for comp in generators {
+        comp.ifs.serialize(ser);
+    }
+    // Serialize all is_async flags
+    for comp in generators {
+        ser.write_bool(comp.is_async);
+    }
+    ser.write_location(range);
 }
 
 fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
@@ -766,27 +798,15 @@ impl Ser for ast::Expr {
             }
             ast::Expr::Generator(g) => {
                 ser.write_tag(TAG_GENERATOR_EXPR);
-                // Serialize element expression
-                g.elt.serialize(ser);
-                // Serialize number of generators
-                ser.write_tagged_int(g.generators.len() as i64);
-                // Serialize all indices (targets)
-                for comp in &g.generators {
-                    comp.target.serialize(ser);
-                }
-                // Serialize all sequences (iters)
-                for comp in &g.generators {
-                    comp.iter.serialize(ser);
-                }
-                // Serialize all condlists (ifs for each generator)
-                for comp in &g.generators {
-                    comp.ifs.serialize(ser);
-                }
-                // Serialize all is_async flags
-                for comp in &g.generators {
-                    ser.write_bool(comp.is_async);
-                }
-                ser.write_location(g.range());
+                serialize_comprehension(ser, &g.elt, &g.generators, g.range());
+            }
+            ast::Expr::ListComp(lc) => {
+                ser.write_tag(TAG_LIST_COMPREHENSION);
+                serialize_comprehension(ser, &lc.elt, &lc.generators, lc.range());
+            }
+            ast::Expr::SetComp(sc) => {
+                ser.write_tag(TAG_SET_COMPREHENSION);
+                serialize_comprehension(ser, &sc.elt, &sc.generators, sc.range());
             }
             ast::Expr::Yield(y) => {
                 ser.write_tag(TAG_YIELD_EXPR);
