@@ -69,6 +69,7 @@ const TAG_YIELD_EXPR: u8 = 191;
 const TAG_YIELD_FROM_EXPR: u8 = 192;
 const TAG_LIST_COMPREHENSION: u8 = 193;
 const TAG_SET_COMPREHENSION: u8 = 194;
+const TAG_DICT_COMPREHENSION: u8 = 195;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 
@@ -807,6 +808,32 @@ impl Ser for ast::Expr {
             ast::Expr::SetComp(sc) => {
                 ser.write_tag(TAG_SET_COMPREHENSION);
                 serialize_comprehension(ser, &sc.elt, &sc.generators, sc.range());
+            }
+            ast::Expr::DictComp(dc) => {
+                ser.write_tag(TAG_DICT_COMPREHENSION);
+                // Serialize key expression
+                dc.key.serialize(ser);
+                // Serialize value expression
+                dc.value.serialize(ser);
+                // Serialize number of generators
+                ser.write_tagged_int(dc.generators.len() as i64);
+                // Serialize all indices (targets)
+                for comp in &dc.generators {
+                    comp.target.serialize(ser);
+                }
+                // Serialize all sequences (iters)
+                for comp in &dc.generators {
+                    comp.iter.serialize(ser);
+                }
+                // Serialize all condlists (ifs for each generator)
+                for comp in &dc.generators {
+                    comp.ifs.serialize(ser);
+                }
+                // Serialize all is_async flags
+                for comp in &dc.generators {
+                    ser.write_bool(comp.is_async);
+                }
+                ser.write_location(dc.range());
             }
             ast::Expr::Yield(y) => {
                 ser.write_tag(TAG_YIELD_EXPR);
