@@ -10,20 +10,23 @@ documentation = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }
 
+[lib]
+name = "ast_serialize"
+crate-type = ["cdylib"]
+
 [dependencies]
-ruff_linter = { workspace = true, features = ["schemars"] }
+# PyO3 for Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+# Ruff dependencies for parsing Python
+ruff_linter = { workspace = true }
 ruff_python_ast = { workspace = true }
 ruff_python_parser = { workspace = true }
 ruff_source_file = { workspace = true }
 ruff_text_size = { workspace = true }
 
+# Error handling
 anyhow = { workspace = true }
-clap = { workspace = true, features = ["wrap_help"] }
-ignore = { workspace = true }
-itertools = { workspace = true }
-regex = { workspace = true }
-schemars = { workspace = true }
-tempfile = { workspace = true }
 
 [dev-dependencies]
 indoc = { workspace = true }

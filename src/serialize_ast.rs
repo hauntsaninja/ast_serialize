@@ -1,8 +1,6 @@
 //! Serialize the AST for a given Python file as a mypy AST
 
-use std::io::{self, Write};
-use std::path::PathBuf;
-use std::time::Instant;
+use std::path::Path;
 
 use anyhow::Result;
 use ruff_linter::source_kind::SourceKind;
@@ -91,32 +89,34 @@ const TWO_BYTES_INT_BIT: i64 = 1;
 const FOUR_BYTES_INT_TRAILER: i64 = 3;
 const LONG_INT_TRAILER: u8 = 15;
 
-#[derive(clap::Args)]
-pub(crate) struct Args {
-    /// Python file for which to generate the AST.
-    #[arg(required = true)]
-    file: PathBuf,
-}
-
-pub(crate) fn main(args: &Args) -> Result<()> {
-    let source_type = PySourceType::from(&args.file);
-    let source_kind = SourceKind::from_path(&args.file, source_type)?.ok_or_else(|| {
+/// Serialize a Python file to mypy AST format.
+///
+/// # Arguments
+///
+/// * `file_path` - Path to the Python file to parse and serialize
+///
+/// # Returns
+///
+/// A `Vec<u8>` containing the serialized AST in mypy's binary format
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed
+pub fn serialize_python_file(file_path: &Path) -> Result<Vec<u8>> {
+    let source_type = PySourceType::from(file_path);
+    let source_kind = SourceKind::from_path(file_path, source_type)?.ok_or_else(|| {
         anyhow::anyhow!(
             "Could not determine source kind for file: {}",
-            args.file.display()
+            file_path.display()
         )
     })?;
-    let start = Instant::now();
     let python_ast =
         parse(source_kind.source_code(), ParseOptions::from(source_type))?.into_syntax();
-    let _ = start.elapsed();
     let line_index = LineIndex::from_source_text(source_kind.source_code());
     let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), line_index: line_index, text: source_kind.source_code() };
     python_ast.serialize(&mut ser);
 
-    io::stdout().write_all(&ser.bytes)?;
-
-    Ok(())
+    Ok(ser.bytes)
 }
 
 // Used to report which imports are used in a file
