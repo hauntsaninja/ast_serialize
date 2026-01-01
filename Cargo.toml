@@ -16,8 +16,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings
-# abi3-py39 enables stable ABI for Python 3.9+
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+# Base features always enabled; abi3-py39 is added via stable-abi feature
+pyo3 = { version = "0.23", features = ["extension-module"] }
 
 # Ruff dependencies for parsing Python
 ruff_linter = { workspace = true }
@@ -33,6 +33,12 @@ anyhow = { workspace = true }
 indoc = { workspace = true }
 
 [features]
+# Default: stable ABI for regular Python 3.9+
+default = ["stable-abi"]
+# Stable ABI wheels (cp39-abi3) - compatible with Python 3.9+
+stable-abi = ["pyo3/abi3-py39"]
+# Free-threaded Python wheels (cp313t) - for nogil Python
+free-threaded = []
 # Turn off rayon for profiling
 singlethreaded = []
 
