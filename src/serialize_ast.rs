@@ -80,6 +80,7 @@ const TAG_ELLIPSIS_EXPR: u8 = 202;
 const TAG_CONDITIONAL_EXPR: u8 = 203;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
+const TAG_LIST_TYPE: u8 = 118;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -478,6 +479,15 @@ fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
                 ser.write_bool(true);
             } else {
                 panic!("unsupported binary operator in type: {:?}", e.op);
+            }
+        }
+        ast::Expr::List(e) => {
+            ser.write_tag(TAG_LIST_TYPE);
+            // Serialize items list
+            ser.write_tag(TAG_LIST_GEN);
+            ser.write_int(e.elts.len() as i64);
+            for item in &e.elts {
+                serialize_type(ser, item);
             }
         }
         _ => {
