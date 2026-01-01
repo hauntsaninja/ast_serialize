@@ -76,6 +76,7 @@ const TAG_FOR_STMT: u8 = 198;
 const TAG_WITH_STMT: u8 = 199;
 const TAG_OPERATOR_ASSIGNMENT_STMT: u8 = 200;
 const TAG_TRY_STMT: u8 = 201;
+const TAG_ELLIPSIS_EXPR: u8 = 202;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 
@@ -1072,6 +1073,10 @@ impl Ser for ast::Expr {
                 ser.write_tag(TAG_NAME_EXPR);
                 ser.write_bytes(b"None");
                 ser.write_location(n.range());
+            }
+            ast::Expr::EllipsisLiteral(e) => {
+                ser.write_tag(TAG_ELLIPSIS_EXPR);
+                ser.write_location(e.range());
             }
             ast::Expr::UnaryOp(u) => {
                 ser.write_tag(TAG_UNARY_EXPR);
