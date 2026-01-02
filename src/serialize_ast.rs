@@ -81,6 +81,7 @@ const TAG_CONDITIONAL_EXPR: u8 = 203;
 const TAG_DEL_STMT: u8 = 204;
 const TAG_FSTRING_EXPR: u8 = 205;
 const TAG_FSTRING_INTERPOLATION: u8 = 206;
+const TAG_LAMBDA_EXPR: u8 = 207;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -1180,6 +1181,35 @@ impl Ser for ast::Expr {
                     }
                 }
                 ser.write_location(fs.range());
+            }
+            ast::Expr::Lambda(lambda) => {
+                ser.write_tag(TAG_LAMBDA_EXPR);
+
+                // Arguments (parameters)
+                if let Some(params) = &lambda.parameters {
+                    serialize_parameters(ser, params);
+                } else {
+                    // No parameters - empty argument list
+                    ser.write_tag(TAG_LIST_GEN);
+                    ser.write_int(0);
+                }
+
+                // Body - lambda body is a single expression, wrap in return statement
+                // Serialize as a block containing a single return statement
+                ser.write_tag(TAG_BLOCK);
+                ser.write_tag(TAG_LIST_GEN);
+                ser.write_int(1); // One statement (the return)
+
+                ser.write_tag(TAG_RETURN);
+                // Return statement has an optional value, we always have a value for lambda
+                ser.write_bool(true);
+                lambda.body.serialize(ser);
+                ser.write_location(lambda.body.range());
+                ser.write_end_tag(); // End of return statement
+
+                ser.write_end_tag(); // End of block
+
+                ser.write_location(lambda.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
