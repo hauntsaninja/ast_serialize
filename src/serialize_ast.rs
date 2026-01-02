@@ -92,6 +92,7 @@ const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
 const TAG_ELLIPSIS_TYPE: u8 = 119;
+const TAG_RAW_EXPRESSION_TYPE: u8 = 120;
 
 // Argument kinds (must match mypy/nodes.py)
 const ARG_POS: i64 = 0;        // Positional argument
@@ -476,6 +477,12 @@ fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
         }
         ast::Expr::NoneLiteral(_) => {
             serialize_simple_unbound_type(ser, b"None");
+        }
+        ast::Expr::BooleanLiteral(b) => {
+            // Serialize as NameExpr with "True" or "False"
+            ser.write_tag(TAG_RAW_EXPRESSION_TYPE);
+            ser.write_bytes(b"builtins.bool");
+            ser.write_bool(b.value);
         }
         ast::Expr::BinOp(e) => {
             // Handle union types (x | y)
