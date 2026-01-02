@@ -85,6 +85,8 @@ const TAG_LAMBDA_EXPR: u8 = 207;
 const TAG_NAMED_EXPR: u8 = 208;
 const TAG_STAR_EXPR: u8 = 209;
 const TAG_BYTES_EXPR: u8 = 210;
+const TAG_GLOBAL_DECL: u8 = 211;
+const TAG_NONLOCAL_DECL: u8 = 212;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -875,6 +877,26 @@ impl Ser for ast::Stmt {
                     ser.write_end_tag();
                 }
                 ser.write_location(d.range());
+            }
+            ast::Stmt::Global(g) => {
+                ser.write_tag(TAG_GLOBAL_DECL);
+                // Write number of names
+                ser.write_tagged_int(g.names.len() as i64);
+                // Write each name
+                for name in &g.names {
+                    ser.write_bytes(name.as_bytes());
+                }
+                ser.write_location(g.range());
+            }
+            ast::Stmt::Nonlocal(n) => {
+                ser.write_tag(TAG_NONLOCAL_DECL);
+                // Write number of names
+                ser.write_tagged_int(n.names.len() as i64);
+                // Write each name
+                for name in &n.names {
+                    ser.write_bytes(name.as_bytes());
+                }
+                ser.write_location(n.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
