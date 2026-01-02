@@ -82,6 +82,7 @@ const TAG_DEL_STMT: u8 = 204;
 const TAG_FSTRING_EXPR: u8 = 205;
 const TAG_FSTRING_INTERPOLATION: u8 = 206;
 const TAG_LAMBDA_EXPR: u8 = 207;
+const TAG_NAMED_EXPR: u8 = 208;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -1210,6 +1211,14 @@ impl Ser for ast::Expr {
                 ser.write_end_tag(); // End of block
 
                 ser.write_location(lambda.range());
+            }
+            ast::Expr::Named(named) => {
+                ser.write_tag(TAG_NAMED_EXPR);
+                // Serialize target expression
+                named.target.serialize(ser);
+                // Serialize value expression
+                named.value.serialize(ser);
+                ser.write_location(named.range());
             }
             _ => {
                 panic!("unsupported: {self:?}");
