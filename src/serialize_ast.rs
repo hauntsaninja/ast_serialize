@@ -1165,7 +1165,20 @@ impl Ser for ast::Expr {
             }
             ast::Expr::FString(fs) => {
                 ser.write_tag(TAG_FSTRING_EXPR);
-                serialize_fstring_elements(ser, fs.value.elements().collect());
+                ser.write_tagged_int(fs.value.iter().len() as i64);
+                for part in fs.value.iter() {
+                    match part {
+                        ast::FStringPart::FString(fstring_part) => {
+                            ser.write_bool(true);
+                            serialize_fstring_elements(ser, fstring_part.elements.iter().collect());
+                        }
+                        ast::FStringPart::Literal(lit) => {
+                            ser.write_bool(false);
+                            ser.write_bytes(lit.value.as_bytes());
+                            ser.write_location(lit.range());
+                        }
+                    }
+                }
                 ser.write_location(fs.range());
             }
             _ => {
@@ -1177,8 +1190,7 @@ impl Ser for ast::Expr {
 }
 
 fn serialize_fstring_elements(ser: &mut Serializer, elems: Vec<&ast::InterpolatedStringElement>) {
-    ser.write_tag(TAG_LIST_GEN);
-    ser.write_usize(elems.len());
+    ser.write_tagged_int(elems.len() as i64);
     for elem in elems {
         match elem {
             ast::InterpolatedStringElement::Literal(lit) => {
