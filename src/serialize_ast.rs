@@ -444,6 +444,8 @@ fn serialize_argument(
 
     // pos_only flag
     ser.write_bool(pos_only);
+
+    ser.write_location(param.range());
 }
 
 fn serialize_simple_unbound_type(ser: &mut Serializer, name: &[u8]) {
