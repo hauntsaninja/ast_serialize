@@ -144,6 +144,10 @@ pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<Sy
         )
     })?;
 
+    if !source_kind.source_code().is_ascii() {
+        panic!("non-ascii source not supported");
+    }
+
     let line_index = LineIndex::from_source_text(source_kind.source_code());
 
     // Parse the file - this always returns a result, even with syntax errors
