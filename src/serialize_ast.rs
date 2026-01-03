@@ -583,10 +583,6 @@ impl Ser for ast::Stmt {
                 // Body
                 ser.serialize_block(&f.body);
 
-                // TODO: Decorators (skip for now)
-                ser.write_tag(TAG_LIST_GEN);
-                ser.write_int(0); // Empty decorator list
-
                 // is_async
                 ser.write_bool(f.is_async);
 
