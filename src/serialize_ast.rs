@@ -10,6 +10,8 @@ use ruff_python_parser::{ParseOptions, parse_unchecked};
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange};
 
+use crate::type_comment;
+
 /// Syntax error information with location details
 #[derive(Debug, Clone)]
 pub struct SyntaxError {
@@ -131,11 +133,12 @@ const LONG_INT_TRAILER: u8 = 15;
 /// A tuple containing:
 /// - A `Vec<u8>` with the serialized AST in mypy's binary format (may be partial if there are syntax errors)
 /// - A `Vec<SyntaxError>` containing any syntax errors with line/column information
+/// - A `Vec<(usize, Vec<String>)>` containing tuples of (line_number, error_codes) for all type: ignore comments
 ///
 /// # Errors
 ///
 /// Returns an error if the file cannot be read (but not for syntax errors, which are returned in the tuple)
-pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<SyntaxError>)> {
+pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<SyntaxError>, Vec<(usize, Vec<String>)>)> {
     let source_type = PySourceType::from(file_path);
     let source_kind = SourceKind::from_path(file_path, source_type)?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -167,6 +170,13 @@ pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<Sy
         })
         .collect();
 
+    // Extract type: ignore comment line numbers from tokens
+    let type_ignore_lines = extract_type_ignore_lines(
+        parsed.tokens(),
+        source_kind.source_code(),
+        &line_index,
+    );
+
     // Serialize the AST (even if partial due to syntax errors)
     let mut ser = Serializer {
         bytes: Vec::new(),
@@ -177,7 +187,7 @@ pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<Sy
     };
     parsed.syntax().serialize(&mut ser);
 
-    Ok((ser.bytes, syntax_errors))
+    Ok((ser.bytes, syntax_errors, type_ignore_lines))
 }
 
 // Used to report which imports are used in a file
@@ -333,6 +343,38 @@ impl Ser for ast::Mod {
             }
         }
     }
+}
+
+/// Extract type ignore comments from tokens with their error codes.
+///
+/// # Arguments
+///
+/// * `tokens` - Reference to the tokens from parsing
+/// * `source` - The source code text
+/// * `line_index` - Line index for converting positions to line numbers
+///
+/// # Returns
+///
+/// A vector of tuples (line_number, error_codes) where `type: ignore` comments appear.
+/// Line numbers are 1-indexed. Error codes are currently always empty.
+fn extract_type_ignore_lines(
+    tokens: &ruff_python_parser::Tokens,
+    source: &str,
+    line_index: &LineIndex,
+) -> Vec<(usize, Vec<String>)> {
+    let mut type_ignore_lines = Vec::new();
+
+    for token in tokens.iter() {
+        if token.kind().is_comment() {
+            let comment_text = &source[token.range()];
+            if let Some(error_codes) = type_comment::parse_type_comment(comment_text) {
+                let location = line_index.line_column(token.start(), source);
+                type_ignore_lines.push((location.line.get(), error_codes));
+            }
+        }
+    }
+
+    type_ignore_lines
 }
 
 /// Helper function to serialize comprehensions (shared by Generator, ListComp, SetComp)
