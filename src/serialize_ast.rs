@@ -98,6 +98,7 @@ const TAG_BYTES_EXPR: u8 = 210;
 const TAG_GLOBAL_DECL: u8 = 211;
 const TAG_NONLOCAL_DECL: u8 = 212;
 const TAG_AWAIT_EXPR: u8 = 213;
+const TAG_BIG_INT_EXPR: u8 = 214;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -1109,8 +1110,11 @@ impl Ser for ast::Expr {
                                 ser.write_tag(TAG_INT_EXPR);
                                 ser.write_tagged_int(x);
                             }
-                            _ => {
-                                panic!("unsupported big int: {self:?}");
+                            None => {
+                                // Use a string representation for big integers. It's not
+                                // very efficient, but these are rare.
+                                ser.write_tag(TAG_BIG_INT_EXPR);
+                                ser.write_bytes(n.to_string().as_bytes());
                             }
                         }
                     }
