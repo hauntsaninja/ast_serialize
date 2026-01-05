@@ -902,8 +902,20 @@ impl Ser for ast::Stmt {
                 // TODO: Type parameters (skip for now)
                 ser.write_bool(false); // No type params
 
-                // TODO: Metaclass (skip for now)
-                ser.write_bool(false); // No metaclass
+                // Metaclass - extract from keywords
+                if let Some(args) = &c.arguments {
+                    let metaclass = args.keywords.iter()
+                        .find(|kw| kw.arg.as_ref().map(|a| a.as_str()) == Some("metaclass"));
+
+                    if let Some(meta_kw) = metaclass {
+                        ser.write_bool(true);  // has_metaclass = true
+                        meta_kw.value.serialize(ser);  // Serialize the metaclass expression
+                    } else {
+                        ser.write_bool(false);  // has_metaclass = false
+                    }
+                } else {
+                    ser.write_bool(false);  // No arguments, no metaclass
+                }
 
                 // TODO: Keywords (skip for now)
                 ser.write_tag(TAG_DICT_STR_GEN);
