@@ -380,6 +380,33 @@ fn extract_type_ignore_lines(
     type_ignore_lines
 }
 
+/// Helper function to serialize bytes literal to escaped string representation
+/// Used for BytesExpr in expression contexts where we need a human-readable form
+fn serialize_bytes_to_escaped_string(bytes_lit: &ast::ExprBytesLiteral) -> Vec<u8> {
+    let mut result = Vec::new();
+    for bytes_part in bytes_lit.value.iter() {
+        for &byte in bytes_part.value.iter() {
+            match byte {
+                b'\r' => result.extend_from_slice(b"\\r"),
+                b'\n' => result.extend_from_slice(b"\\n"),
+                b'\t' => result.extend_from_slice(b"\\t"),
+                b'\\' => result.extend_from_slice(b"\\\\"),
+                b'\'' => result.extend_from_slice(b"\\'"),
+                // Printable ASCII characters (space to ~)
+                32..=126 => result.push(byte),
+                // Everything else as hex escape
+                _ => {
+                    result.extend_from_slice(b"\\x");
+                    result.push(b"0123456789abcdef"[(byte >> 4) as usize]);
+                    result.push(b"0123456789abcdef"[(byte & 0xf) as usize]);
+                }
+            }
+        }
+    }
+    result
+}
+
+
 /// Helper function to serialize comprehensions (shared by Generator, ListComp, SetComp)
 fn serialize_comprehension(
     ser: &mut Serializer,
@@ -1313,26 +1340,7 @@ impl Ser for ast::Expr {
             ast::Expr::BytesLiteral(bytes_lit) => {
                 ser.write_tag(TAG_BYTES_EXPR);
                 // Convert bytes to string representation with escape sequences
-                let mut result = Vec::new();
-                for bytes_part in bytes_lit.value.iter() {
-                    for &byte in bytes_part.value.iter() {
-                        match byte {
-                            b'\r' => result.extend_from_slice(b"\\r"),
-                            b'\n' => result.extend_from_slice(b"\\n"),
-                            b'\t' => result.extend_from_slice(b"\\t"),
-                            b'\\' => result.extend_from_slice(b"\\\\"),
-                            b'\'' => result.extend_from_slice(b"\\'"),
-                            // Printable ASCII characters (space to ~)
-                            32..=126 => result.push(byte),
-                            // Everything else as hex escape
-                            _ => {
-                                result.extend_from_slice(b"\\x");
-                                result.push(b"0123456789abcdef"[(byte >> 4) as usize]);
-                                result.push(b"0123456789abcdef"[(byte & 0xf) as usize]);
-                            }
-                        }
-                    }
-                }
+                let result = serialize_bytes_to_escaped_string(bytes_lit);
                 ser.write_bytes(&result);
                 ser.write_location(bytes_lit.range());
             }
@@ -1487,6 +1495,16 @@ fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
             // Try to parse the string as a type expression
             serialize_string_type(ser, &string_value, s.range());
             return;  // serialize_string_type handles location and end tag
+        }
+        ast::Expr::BytesLiteral(bytes_lit) => {
+            // Bytes literals in type context (e.g., Literal[b"foo"])
+            // Unlike string literals, bytes literals can't be used for forward references,
+            // so they're treated similar to integer literals.
+            // We serialize the bytes as an escaped string (similar to BytesExpr)
+            ser.write_tag(TAG_RAW_EXPRESSION_TYPE);
+            ser.write_bytes(b"builtins.bytes");
+            let result = serialize_bytes_to_escaped_string(bytes_lit);
+            ser.write_bytes(&result);
         }
         _ => {
             panic!("unsupported type: {t:?}");
