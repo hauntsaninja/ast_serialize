@@ -8,6 +8,74 @@
 
 use ruff_python_ast::{self as ast, visitor::Visitor};
 
+/// Check if a function body is "trivial" (e.g., pass, ..., raise, or just docstring).
+///
+/// Trivial bodies may be needed for type checking as they have externally visible impact.
+/// This matches the behavior of mypy's trivial body detection.
+///
+/// A body is considered trivial if it contains:
+/// - Just a docstring (string literal as a standalone statement)
+/// - A docstring followed by pass
+/// - A docstring followed by raise
+/// - A docstring followed by `...` (ellipsis literal)
+///
+/// # Examples
+///
+/// ```python
+/// # Trivial:
+/// def foo():
+///     pass
+///
+/// def bar():
+///     """Docstring"""
+///
+/// def baz():
+///     """Docstring"""
+///     pass
+///
+/// def qux():
+///     raise NotImplementedError
+///
+/// # Not trivial:
+/// def compute():
+///     return 42
+/// ```
+pub fn is_trivial_body(body: &[ast::Stmt]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+
+    let mut i = 0;
+
+    // Skip docstring if present (first statement is a string literal expression)
+    if let Some(ast::Stmt::Expr(expr_stmt)) = body.first() {
+        if matches!(&*expr_stmt.value, ast::Expr::StringLiteral(_)) {
+            i += 1;
+        }
+    }
+
+    // If only a docstring, it's trivial
+    if i == body.len() {
+        return true;
+    }
+
+    // If more than one non-docstring statement, it's not trivial
+    if body.len() > i + 1 {
+        return false;
+    }
+
+    // Check if the single non-docstring statement is pass, raise, or ellipsis
+    let stmt = &body[i];
+    match stmt {
+        ast::Stmt::Pass(_) | ast::Stmt::Raise(_) => true,
+        ast::Stmt::Expr(expr_stmt) => {
+            // Check if it's an ellipsis literal expression
+            matches!(&*expr_stmt.value, ast::Expr::EllipsisLiteral(_))
+        }
+        _ => false,
+    }
+}
+
 /// Check if a function body has externally visible effects.
 ///
 /// Returns `true` if the function body contains:
@@ -49,6 +117,11 @@ pub fn has_externally_visible_effect(
     parameters: &ast::Parameters,
     check_attributes: bool,
 ) -> bool {
+    // Trivial bodies always have externally visible effects (needed for type checking)
+    if is_trivial_body(body) {
+        return true;
+    }
+
     // Get the name of the first parameter (if any)
     let first_param_name = if check_attributes {
         parameters
@@ -507,21 +580,23 @@ def foo(self, /):
 
     #[test]
     fn test_empty_body() {
+        // A body with just `pass` is now considered trivial (externally visible)
         let code = r#"
 def foo(self):
     pass
 "#;
-        assert!(!check_function(code));
+        assert!(check_function(code));
     }
 
     #[test]
     fn test_only_docstring() {
+        // A body with just docstring and pass is now considered trivial (externally visible)
         let code = r#"
 def foo(self):
     """Docstring"""
     pass
 "#;
-        assert!(!check_function(code));
+        assert!(check_function(code));
     }
 
     #[test]
@@ -705,5 +780,119 @@ def foo(items):
         yield item
 "#;
         assert!(check_toplevel_function(code));
+    }
+
+    // Tests for trivial body detection
+
+    #[test]
+    fn test_trivial_pass() {
+        let code = r#"
+def foo():
+    pass
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_ellipsis() {
+        let code = r#"
+def foo():
+    ...
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_raise() {
+        let code = r#"
+def foo():
+    raise NotImplementedError
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_docstring_only() {
+        let code = r#"
+def foo():
+    """Docstring"""
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_docstring_and_pass() {
+        let code = r#"
+def foo():
+    """Docstring"""
+    pass
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_docstring_and_ellipsis() {
+        let code = r#"
+def foo():
+    """Docstring"""
+    ...
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_trivial_docstring_and_raise() {
+        let code = r#"
+def foo():
+    """Docstring"""
+    raise NotImplementedError
+"#;
+        assert!(check_function(code));
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_not_trivial_return() {
+        let code = r#"
+def foo():
+    return 42
+"#;
+        assert!(!check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_not_trivial_assignment() {
+        let code = r#"
+def foo():
+    x = 1
+"#;
+        assert!(!check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_not_trivial_multiple_statements() {
+        let code = r#"
+def foo():
+    """Docstring"""
+    pass
+    pass
+"#;
+        assert!(!check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_not_trivial_docstring_and_return() {
+        let code = r#"
+def foo():
+    """Docstring"""
+    return 42
+"#;
+        assert!(!check_toplevel_function(code));
     }
 }
