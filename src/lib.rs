@@ -11,6 +11,7 @@ mod func_effect_visitor;
 /// # Arguments
 ///
 /// * `fnam` - Path to the Python file to parse
+/// * `skip_function_bodies` - Optional boolean to skip function bodies without externally visible effects (default: false)
 ///
 /// # Returns
 ///
@@ -23,10 +24,16 @@ mod func_effect_visitor;
 ///
 /// Raises ValueError if the file cannot be read (but not for syntax errors)
 #[pyfunction]
-fn parse(py: Python, fnam: String) -> PyResult<(Vec<u8>, Vec<PyObject>, Vec<PyObject>)> {
+#[pyo3(signature = (fnam, skip_function_bodies=false))]
+fn parse(
+    py: Python,
+    fnam: String,
+    skip_function_bodies: bool,
+) -> PyResult<(Vec<u8>, Vec<PyObject>, Vec<PyObject>)> {
     let path = Path::new(&fnam);
-    let (ast_bytes, syntax_errors, type_ignore_lines) = serialize_ast::serialize_python_file(path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+    let (ast_bytes, syntax_errors, type_ignore_lines) =
+        serialize_ast::serialize_python_file(path, skip_function_bodies)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     // Convert syntax errors to Python dicts
     let py_errors: Vec<PyObject> = syntax_errors

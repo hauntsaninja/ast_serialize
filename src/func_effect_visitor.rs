@@ -11,7 +11,7 @@ use ruff_python_ast::{self as ast, visitor::Visitor};
 /// Check if a function body has externally visible effects.
 ///
 /// Returns `true` if the function body contains:
-/// - Any assignments to attributes of the first parameter:
+/// - Any assignments to attributes of the first parameter (if `check_attributes` is true):
 ///   - Direct assignments: `self.x = 1`
 ///   - Augmented assignments: `self.x += 1`
 ///   - Annotated assignments: `self.x: int = 1`
@@ -23,13 +23,20 @@ use ruff_python_ast::{self as ast, visitor::Visitor};
 ///
 /// Returns `false` if no externally visible effects are found.
 ///
+/// # Arguments
+///
+/// * `body` - The function body statements to analyze
+/// * `parameters` - The function parameters
+/// * `check_attributes` - Whether to check for attribute assignments (true for methods, false for top-level functions)
+///
 /// # Examples
 ///
 /// ```python
-/// # Returns true for:
+/// # Returns true for (when check_attributes=true):
 /// def foo(self):
 ///     self.x = 1
 ///
+/// # Returns true for (regardless of check_attributes):
 /// def bar():
 ///     yield 1
 ///
@@ -37,14 +44,22 @@ use ruff_python_ast::{self as ast, visitor::Visitor};
 /// def baz(self):
 ///     local_var = 1
 /// ```
-pub fn has_externally_visible_effect(body: &[ast::Stmt], parameters: &ast::Parameters) -> bool {
+pub fn has_externally_visible_effect(
+    body: &[ast::Stmt],
+    parameters: &ast::Parameters,
+    check_attributes: bool,
+) -> bool {
     // Get the name of the first parameter (if any)
-    let first_param_name = parameters
-        .posonlyargs
-        .first()
-        .or(parameters.args.first())
-        .map(|p| p.parameter.name.as_str())
-        .unwrap_or("");
+    let first_param_name = if check_attributes {
+        parameters
+            .posonlyargs
+            .first()
+            .or(parameters.args.first())
+            .map(|p| p.parameter.name.as_str())
+            .unwrap_or("")
+    } else {
+        "" // Don't check attributes if not requested
+    };
 
     let mut visitor = EffectDetector {
         first_param_name,
@@ -175,6 +190,7 @@ mod tests {
     use ruff_python_ast::PySourceType;
 
     /// Helper to parse a function and check if it has externally visible effects
+    /// Assumes we're checking a method (check_attributes = true)
     fn check_function(code: &str) -> bool {
         let parsed = parse_unchecked(code, ParseOptions::from(PySourceType::Python));
         let ast::Mod::Module(module) = parsed.into_syntax() else {
@@ -184,7 +200,23 @@ mod tests {
         // Get the first function definition
         for stmt in &module.body {
             if let ast::Stmt::FunctionDef(func) = stmt {
-                return has_externally_visible_effect(&func.body, &func.parameters);
+                return has_externally_visible_effect(&func.body, &func.parameters, true);
+            }
+        }
+        panic!("No function found in code");
+    }
+
+    /// Helper to check top-level function (check_attributes = false)
+    fn check_toplevel_function(code: &str) -> bool {
+        let parsed = parse_unchecked(code, ParseOptions::from(PySourceType::Python));
+        let ast::Mod::Module(module) = parsed.into_syntax() else {
+            panic!("Expected module");
+        };
+
+        // Get the first function definition
+        for stmt in &module.body {
+            if let ast::Stmt::FunctionDef(func) = stmt {
+                return has_externally_visible_effect(&func.body, &func.parameters, false);
             }
         }
         panic!("No function found in code");
@@ -632,5 +664,46 @@ def foo():
     yield 1
 "#;
         assert!(check_function(code));
+    }
+
+    // Tests for top-level functions (check_attributes = false)
+
+    #[test]
+    fn test_toplevel_with_yield() {
+        let code = r#"
+def foo():
+    yield 1
+"#;
+        assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_toplevel_with_attribute_assignment() {
+        // Top-level function with attribute assignment should NOT count
+        // (since check_attributes = false)
+        let code = r#"
+def foo(self):
+    self.x = 1
+"#;
+        assert!(!check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_toplevel_plain_function() {
+        let code = r#"
+def foo(x):
+    return x + 1
+"#;
+        assert!(!check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_toplevel_with_yield_in_loop() {
+        let code = r#"
+def foo(items):
+    for item in items:
+        yield item
+"#;
+        assert!(check_toplevel_function(code));
     }
 }

@@ -11,6 +11,7 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::type_comment;
+use crate::func_effect_visitor;
 
 /// Syntax error information with location details
 #[derive(Debug, Clone)]
@@ -130,6 +131,8 @@ const LONG_INT_TRAILER: u8 = 15;
 /// # Arguments
 ///
 /// * `file_path` - Path to the Python file to parse and serialize
+/// * `skip_function_bodies` - If true, omit function bodies unless they have externally visible effects
+///   (for methods in classes only; module-level functions always have bodies omitted when this is true)
 ///
 /// # Returns
 ///
@@ -141,7 +144,10 @@ const LONG_INT_TRAILER: u8 = 15;
 /// # Errors
 ///
 /// Returns an error if the file cannot be read (but not for syntax errors, which are returned in the tuple)
-pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<SyntaxError>, Vec<(usize, Vec<String>)>)> {
+pub(crate) fn serialize_python_file(
+    file_path: &Path,
+    skip_function_bodies: bool,
+) -> Result<(Vec<u8>, Vec<SyntaxError>, Vec<(usize, Vec<String>)>)> {
     let source_type = PySourceType::from(file_path);
     let source_kind = SourceKind::from_path(file_path, source_type)?.ok_or_else(|| {
         anyhow::anyhow!(
@@ -186,7 +192,9 @@ pub(crate) fn serialize_python_file(file_path: &Path) -> Result<(Vec<u8>, Vec<Sy
         imports: Vec::new(),
         import_froms: Vec::new(),
         line_index,
-        text: source_kind.source_code()
+        text: source_kind.source_code(),
+        skip_function_bodies,
+        in_class: false,
     };
     parsed.syntax().serialize(&mut ser);
 
@@ -212,7 +220,9 @@ struct Serializer<'a> {
     imports: Vec<Import>,  // Encountered import statements
     import_froms: Vec<ImportFrom>,  // Encountered from...import statements
     line_index: LineIndex,
-    text: & 'a str
+    text: &'a str,
+    skip_function_bodies: bool,  // Whether to omit function bodies without visible effects
+    in_class: bool,  // Whether we're currently inside a class definition
 }
 
 impl<'a> Serializer<'a> {
@@ -293,6 +303,16 @@ impl<'a> Serializer<'a> {
         for stmt in block {
             stmt.serialize(self);
         }
+        self.write_end_tag();
+    }
+
+    fn serialize_empty_block(&mut self, range: TextRange) {
+        self.write_tag(TAG_BLOCK);
+        self.write_tag(TAG_LIST_GEN);
+        self.write_int(1);
+        self.write_tag(TAG_PASS_STMT);
+        self.write_location(range);
+        self.write_end_tag();
         self.write_end_tag();
     }
 }
@@ -546,8 +566,25 @@ impl Ser for ast::Stmt {
                 // Parameters
                 serialize_parameters(ser, &f.parameters);
 
-                // Body
-                ser.serialize_block(&f.body);
+                // Body - may be omitted if skip_function_bodies is enabled
+                let should_serialize_body = if ser.skip_function_bodies {
+                    // Check for externally visible effects
+                    // For methods (in_class), check both attributes and yield
+                    // For top-level functions, check only yield
+                    func_effect_visitor::has_externally_visible_effect(
+                        &f.body,
+                        &f.parameters,
+                        ser.in_class,  // Only check attributes for methods in classes
+                    )
+                } else {
+                    true
+                };
+
+                if should_serialize_body {
+                    ser.serialize_block(&f.body);
+                } else {
+                    ser.serialize_empty_block(f.range());
+                }
 
                 ser.write_bool(f.is_async);
 
@@ -813,8 +850,11 @@ impl Ser for ast::Stmt {
                 // Class name
                 ser.write_bytes(c.name.as_bytes());
 
-                // Body
+                // Body - mark that we're inside a class
+                let was_in_class = ser.in_class;
+                ser.in_class = true;
                 ser.serialize_block(&c.body);
+                ser.in_class = was_in_class;
 
                 // Base classes (positional arguments in class definition)
                 ser.write_tag(TAG_LIST_GEN);
@@ -1731,7 +1771,15 @@ mod tests {
 
     fn make_ser<'a>(text: &'a str) -> Serializer<'a> {
         let index = LineIndex::from_source_text(text);
-        Serializer { bytes: Vec::new(), imports: Vec::new(), import_froms: Vec::new(), line_index: index, text: text }
+        Serializer {
+            bytes: Vec::new(),
+            imports: Vec::new(),
+            import_froms: Vec::new(),
+            line_index: index,
+            text,
+            skip_function_bodies: false,
+            in_class: false,
+        }
     }
 
     #[test]
@@ -1798,7 +1846,15 @@ mod tests {
         let text = "print('hello')";
         let ast = parse_unchecked(text, opt).into_syntax();
         let index = LineIndex::from_source_text(text);
-        let mut ser = Serializer { bytes: Vec::new(), imports: Vec::new(), import_froms: Vec::new(), line_index: index, text: text };
+        let mut ser = Serializer {
+            bytes: Vec::new(),
+            imports: Vec::new(),
+            import_froms: Vec::new(),
+            line_index: index,
+            text,
+            skip_function_bodies: false,
+            in_class: false,
+        };
         ast.serialize(&mut ser);
         let _ = ser;  // TODO: drop when not needed
 
