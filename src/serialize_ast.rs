@@ -309,10 +309,8 @@ impl<'a> Serializer<'a> {
     fn serialize_empty_block(&mut self, range: TextRange) {
         self.write_tag(TAG_BLOCK);
         self.write_tag(TAG_LIST_GEN);
-        self.write_int(1);
-        self.write_tag(TAG_PASS_STMT);
-        self.write_location(range);
-        self.write_end_tag();
+        self.write_int(0);  // Empty list of statements
+        self.write_location(range);  // Write location after zero-length list
         self.write_end_tag();
     }
 }
@@ -583,7 +581,13 @@ impl Ser for ast::Stmt {
                 if should_serialize_body {
                     ser.serialize_block(&f.body);
                 } else {
-                    ser.serialize_empty_block(f.range());
+                    // Use the range covering the entire body (start of first stmt to end of last stmt)
+                    let body_range = if !f.body.is_empty() {
+                        TextRange::new(f.body[0].start(), f.body[f.body.len() - 1].end())
+                    } else {
+                        f.range()
+                    };
+                    ser.serialize_empty_block(body_range);
                 }
 
                 ser.write_bool(f.is_async);

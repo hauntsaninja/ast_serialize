@@ -189,6 +189,24 @@ impl<'a> Visitor<'a> for EffectDetector<'a> {
                     return;
                 }
             }
+            ast::Stmt::With(with_stmt) => {
+                // Check `with expr as target:` - target can be self.x
+                for item in &with_stmt.items {
+                    if let Some(optional_vars) = &item.optional_vars {
+                        if self.contains_param_attribute(optional_vars) {
+                            self.defines_attributes = true;
+                            return;
+                        }
+                    }
+                }
+            }
+            ast::Stmt::For(for_stmt) => {
+                // Check `for target in iter:` - target can be self.x
+                if self.contains_param_attribute(&for_stmt.target) {
+                    self.defines_attributes = true;
+                    return;
+                }
+            }
             _ => {}
         }
 
@@ -780,6 +798,26 @@ def foo(items):
         yield item
 "#;
         assert!(check_toplevel_function(code));
+    }
+
+    #[test]
+    fn test_with_statement_target() {
+        let code = r#"
+def foo(self):
+    with y as self.x:
+        pass
+"#;
+        assert!(check_function(code));
+    }
+
+    #[test]
+    fn test_for_statement_target() {
+        let code = r#"
+def foo(self):
+    for self.x in items:
+        pass
+"#;
+        assert!(check_function(code));
     }
 
     // Tests for trivial body detection
