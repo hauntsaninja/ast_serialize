@@ -1,6 +1,7 @@
 //! Serialize the AST for a given Python file as a mypy AST
 
 use std::path::Path;
+use std::collections::HashMap;
 
 use anyhow::Result;
 use ruff_linter::source_kind::SourceKind;
@@ -189,8 +190,8 @@ pub(crate) fn serialize_python_file(
         })
         .collect();
 
-    // Extract type: ignore comment line numbers from tokens
-    let type_ignore_lines = extract_type_ignore_lines(
+    // Extract both type: ignore comments and type annotation comments in a single pass
+    let (type_ignore_lines, type_comments) = extract_type_comments_and_ignores(
         parsed.tokens(),
         source_text,
         &line_index,
@@ -207,6 +208,7 @@ pub(crate) fn serialize_python_file(
         in_class: false,
         is_all_ascii,
         lines_with_non_ascii,
+        type_comments,
     };
     parsed.syntax().serialize(&mut ser);
 
@@ -237,6 +239,7 @@ struct Serializer<'a> {
     in_class: bool,  // Whether we're currently inside a class definition
     is_all_ascii: bool,  // Whether the entire file contains only ASCII characters
     lines_with_non_ascii: Vec<bool>,  // Per-line flags: true if line has non-ASCII (empty if is_all_ascii)
+    type_comments: HashMap<usize, ast::Expr>,  // Type comments by line number (1-indexed)
 }
 
 impl<'a> Serializer<'a> {
@@ -445,7 +448,7 @@ impl Ser for ast::Mod {
     }
 }
 
-/// Extract type ignore comments from tokens with their error codes.
+/// Extract type comments (both type: ignore and type annotations) from tokens in a single pass.
 ///
 /// # Arguments
 ///
@@ -455,26 +458,52 @@ impl Ser for ast::Mod {
 ///
 /// # Returns
 ///
-/// A vector of tuples (line_number, error_codes) where `type: ignore` comments appear.
-/// Line numbers are 1-indexed. Error codes are currently always empty.
-fn extract_type_ignore_lines(
+/// A tuple containing:
+/// - A vector of tuples (line_number, error_codes) where `type: ignore` comments appear
+/// - A HashMap mapping line numbers (1-indexed) to parsed type annotation AST expressions
+///
+/// This function combines the functionality of extract_type_ignore_lines and extract_type_comments
+/// to avoid two separate passes over the token sequence, improving cache locality.
+fn extract_type_comments_and_ignores(
     tokens: &ruff_python_parser::Tokens,
     source: &str,
     line_index: &LineIndex,
-) -> Vec<(usize, Vec<String>)> {
+) -> (Vec<(usize, Vec<String>)>, HashMap<usize, ast::Expr>) {
     let mut type_ignore_lines = Vec::new();
+    let mut type_comments = HashMap::new();
 
     for token in tokens.iter() {
         if token.kind().is_comment() {
             let comment_text = &source[token.range()];
-            if let Some(error_codes) = type_comment::parse_type_comment(comment_text) {
-                let location = line_index.line_column(token.start(), source);
-                type_ignore_lines.push((location.line.get(), error_codes));
+            let location = line_index.line_column(token.start(), source);
+            let line_number = location.line.get();
+
+            match type_comment::parse_type_comment_kind(comment_text) {
+                Some(type_comment::TypeCommentKind::Ignore(error_codes)) => {
+                    // Type: ignore comment
+                    type_ignore_lines.push((line_number, error_codes));
+                }
+                Some(type_comment::TypeCommentKind::TypeAnnotation(annotation)) => {
+                    // Type annotation comment - parse the type string into an AST expression
+                    // Similar to how serialize_string_type parses forward references
+                    let wrapped = format!("({})", annotation);
+                    let parse_result = parse_unchecked(&wrapped, ParseOptions::from(Mode::Expression));
+
+                    // Only store if parsing succeeded
+                    if parse_result.errors().is_empty() {
+                        if let ast::Mod::Expression(expr_mod) = parse_result.into_syntax() {
+                            type_comments.insert(line_number, *expr_mod.body);
+                        }
+                    }
+                }
+                None => {
+                    // Not a type comment, skip
+                }
             }
         }
     }
 
-    type_ignore_lines
+    (type_ignore_lines, type_comments)
 }
 
 /// Helper function to serialize bytes literal to escaped string representation
@@ -728,9 +757,24 @@ impl Ser for ast::Stmt {
                 ser.write_tag(TAG_ASSIGN);
                 a.targets.serialize(ser);
                 a.value.serialize(ser);
-                // No type annotation
-                ser.write_bool(false);
-                // new_syntax = false (not using PEP 526 syntax)
+
+                // Check if there's a type comment on the same line as this assignment
+                let location = ser.line_index.line_column(a.start(), ser.text);
+                let line_number = location.line.get();
+
+                // Clone the type expression to avoid borrow checker issues
+                let type_expr = ser.type_comments.get(&line_number).cloned();
+
+                if let Some(type_expr) = type_expr {
+                    // Has type annotation from type comment
+                    ser.write_bool(true);
+                    serialize_type(ser, &type_expr);
+                } else {
+                    // No type annotation
+                    ser.write_bool(false);
+                }
+
+                // new_syntax = false (not using PEP 526 syntax, using type comment)
                 ser.write_bool(false);
                 ser.write_location(a.range());
             }
@@ -1906,6 +1950,7 @@ mod tests {
             in_class: false,
             is_all_ascii,
             lines_with_non_ascii,
+            type_comments: HashMap::new(),
         }
     }
 
