@@ -534,6 +534,13 @@ fn serialize_comprehension(
     ser.write_location(range);
 }
 
+/// Check if argument name should be elided (treated as positional-only).
+/// Returns true if the name starts with "__" but doesn't end with "__".
+/// This matches the behavior of mypy.sharedparse.argument_elide_name.
+fn argument_elide_name(name: &str) -> bool {
+    name.starts_with("__") && !name.ends_with("__")
+}
+
 fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
     // Count total number of arguments
     let mut arg_count = 0;
@@ -558,7 +565,8 @@ fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
 
     // Serialize regular positional arguments
     for param in &params.args {
-        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, false);
+        let pos_only = argument_elide_name(&param.parameter.name);
+        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, pos_only);
     }
 
     // Serialize *args
