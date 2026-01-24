@@ -2,9 +2,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use std::path::Path;
 
+mod func_effect_visitor;
 mod serialize_ast;
 pub mod type_comment;
-mod func_effect_visitor;
 
 /// Parse a Python file and serialize its AST to mypy's binary format.
 ///
@@ -51,7 +51,15 @@ fn parse(
     let py_type_ignores: Vec<PyObject> = type_ignore_lines
         .iter()
         .map(|(line, error_codes)| {
-            PyTuple::new(py, [line.into_pyobject(py).unwrap().into_any(), error_codes.into_pyobject(py).unwrap().into_any()]).unwrap().into()
+            PyTuple::new(
+                py,
+                [
+                    line.into_pyobject(py).unwrap().into_any(),
+                    error_codes.into_pyobject(py).unwrap().into_any(),
+                ],
+            )
+            .unwrap()
+            .into()
         })
         .collect();
 

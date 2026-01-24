@@ -259,11 +259,16 @@ impl<'a> EffectDetector<'a> {
             }
             ast::Expr::Tuple(tuple) => {
                 // Check all elements in tuple: `self.x, self.y = f()`
-                tuple.elts.iter().any(|elt| self.contains_param_attribute(elt))
+                tuple
+                    .elts
+                    .iter()
+                    .any(|elt| self.contains_param_attribute(elt))
             }
             ast::Expr::List(list) => {
                 // Check all elements in list: `[self.x, self.y] = f()`
-                list.elts.iter().any(|elt| self.contains_param_attribute(elt))
+                list.elts
+                    .iter()
+                    .any(|elt| self.contains_param_attribute(elt))
             }
             ast::Expr::Starred(starred) => {
                 // Check starred expression: `*self.x = range(10)`
@@ -277,8 +282,8 @@ impl<'a> EffectDetector<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ruff_python_parser::{parse_unchecked, ParseOptions};
     use ruff_python_ast::PySourceType;
+    use ruff_python_parser::{ParseOptions, parse_unchecked};
 
     /// Helper to parse a function and check if it has externally visible effects
     /// Assumes we're checking a method (check_attributes = true)

@@ -47,14 +47,17 @@ pub fn parse_type_comment_kind(comment: &str) -> Option<TypeCommentKind> {
     if after_type.starts_with("ignore") {
         // Check if "ignore" is followed by whitespace, '[', or end of string
         let after_ignore = &after_type["ignore".len()..];
-        if after_ignore.is_empty() || after_ignore.starts_with(|c: char| c.is_whitespace() || c == '[') {
+        if after_ignore.is_empty()
+            || after_ignore.starts_with(|c: char| c.is_whitespace() || c == '[')
+        {
             // Parse as type: ignore
             let after_ignore_trimmed = after_ignore.trim_start();
 
             // Check if there are error codes in brackets
             if after_ignore_trimmed.starts_with('[') {
                 // Ensure only whitespace was between 'ignore' and '['
-                let whitespace_between = &after_ignore[..after_ignore.len() - after_ignore_trimmed.len()];
+                let whitespace_between =
+                    &after_ignore[..after_ignore.len() - after_ignore_trimmed.len()];
                 if !whitespace_between.chars().all(char::is_whitespace) {
                     return None;
                 }
@@ -156,7 +159,10 @@ mod tests {
         );
         assert_eq!(
             parse_type_comment("# type: ignore[name-defined,no-untyped-def]"),
-            Some(vec!["name-defined".to_string(), "no-untyped-def".to_string()])
+            Some(vec![
+                "name-defined".to_string(),
+                "no-untyped-def".to_string()
+            ])
         );
     }
 
@@ -226,7 +232,9 @@ mod tests {
         );
         assert_eq!(
             parse_type_comment_kind("# type: Dict[str, int]"),
-            Some(TypeCommentKind::TypeAnnotation("Dict[str, int]".to_string()))
+            Some(TypeCommentKind::TypeAnnotation(
+                "Dict[str, int]".to_string()
+            ))
         );
     }
 

@@ -1,17 +1,17 @@
 //! Serialize the AST for a given Python file as a mypy AST
 
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::Result;
-use ruff_python_ast::{PySourceType, Number};
 use ruff_python_ast::{self as ast};
+use ruff_python_ast::{Number, PySourceType};
 use ruff_python_parser::{Mode, ParseOptions, parse_unchecked};
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::type_comment;
 use crate::func_effect_visitor;
+use crate::type_comment;
 
 /// Syntax error information with location details
 #[derive(Debug, Clone)]
@@ -22,21 +22,21 @@ pub struct SyntaxError {
 }
 
 // Fixed tags for primitive types (must match mypy/cache.py)
-const TAG_LITERAL_FALSE: u8   = 0;
-const TAG_LITERAL_TRUE: u8    = 1;
-const TAG_LITERAL_NONE: u8    = 2;
-const TAG_LITERAL_INT: u8     = 3;
-const TAG_LITERAL_STR: u8     = 4;
-const TAG_LITERAL_BYTES: u8   = 5;
-const TAG_LITERAL_FLOAT: u8   = 6;
+const TAG_LITERAL_FALSE: u8 = 0;
+const TAG_LITERAL_TRUE: u8 = 1;
+const TAG_LITERAL_NONE: u8 = 2;
+const TAG_LITERAL_INT: u8 = 3;
+const TAG_LITERAL_STR: u8 = 4;
+const TAG_LITERAL_BYTES: u8 = 5;
+const TAG_LITERAL_FLOAT: u8 = 6;
 const TAG_LITERAL_COMPLEX: u8 = 7;
 
 // Fixed tags for collections (must match mypy/cache.py)
-const TAG_LIST_GEN: u8      = 20;
-const TAG_LIST_INT: u8      = 21;
-const TAG_LIST_STR: u8      = 22;
-const TAG_LIST_BYTES: u8    = 23;
-const TAG_DICT_STR_GEN: u8  = 30;
+const TAG_LIST_GEN: u8 = 20;
+const TAG_LIST_INT: u8 = 21;
+const TAG_LIST_STR: u8 = 22;
+const TAG_LIST_BYTES: u8 = 23;
+const TAG_DICT_STR_GEN: u8 = 30;
 
 const TAG_DECORATOR: u8 = 53;
 const TAG_CLASS_DEF: u8 = 60;
@@ -110,18 +110,18 @@ const TAG_CALL_TYPE: u8 = 121;
 const TAG_UNPACK_TYPE: u8 = 105;
 
 // Argument kinds (must match mypy/nodes.py)
-const ARG_POS: i64 = 0;        // Positional argument
-const ARG_OPT: i64 = 1;        // Positional argument with default
-const ARG_STAR: i64 = 2;       // *args
-const ARG_NAMED: i64 = 3;      // Keyword-only argument
-const ARG_STAR2: i64 = 4;      // **kwargs
-const ARG_NAMED_OPT: i64 = 5;  // Keyword-only argument with default
+const ARG_POS: i64 = 0; // Positional argument
+const ARG_OPT: i64 = 1; // Positional argument with default
+const ARG_STAR: i64 = 2; // *args
+const ARG_NAMED: i64 = 3; // Keyword-only argument
+const ARG_STAR2: i64 = 4; // **kwargs
+const ARG_NAMED_OPT: i64 = 5; // Keyword-only argument with default
 
 const MIN_SHORT_INT: i64 = -10;
 const MIN_TWO_BYTES_INT: i64 = -100;
-const MAX_TWO_BYTES_INT: i64 = 16283;  // 2 ** (8 + 6) - 1 - 100
+const MAX_TWO_BYTES_INT: i64 = 16283; // 2 ** (8 + 6) - 1 - 100
 const MIN_FOUR_BYTES_INT: i64 = -10000;
-const MAX_FOUR_BYTES_INT: i64 = 536860911;  // 2 ** (3 * 8 + 5) - 1 - 10000
+const MAX_FOUR_BYTES_INT: i64 = 536860911; // 2 ** (3 * 8 + 5) - 1 - 10000
 
 const TWO_BYTES_INT_BIT: i64 = 1;
 const FOUR_BYTES_INT_TRAILER: i64 = 3;
@@ -156,13 +156,10 @@ pub(crate) fn serialize_python_file(
     // Check if file is all ASCII and build per-line non-ASCII flags if needed
     let is_all_ascii = source_text.is_ascii();
     let lines_with_non_ascii = if is_all_ascii {
-        Vec::new()  // No need to track per-line if whole file is ASCII
+        Vec::new() // No need to track per-line if whole file is ASCII
     } else {
         // Build a Vec<bool> indicating which lines have non-ASCII characters
-        source_text
-            .lines()
-            .map(|line| !line.is_ascii())
-            .collect()
+        source_text.lines().map(|line| !line.is_ascii()).collect()
     };
 
     // Parse the file - this always returns a result, even with syntax errors
@@ -183,11 +180,8 @@ pub(crate) fn serialize_python_file(
         .collect();
 
     // Extract both type: ignore comments and type annotation comments in a single pass
-    let (type_ignore_lines, type_comments) = extract_type_comments_and_ignores(
-        parsed.tokens(),
-        &source_text,
-        &line_index,
-    );
+    let (type_ignore_lines, type_comments) =
+        extract_type_comments_and_ignores(parsed.tokens(), &source_text, &line_index);
 
     // Serialize the AST (even if partial due to syntax errors)
     let mut ser = Serializer {
@@ -210,28 +204,28 @@ pub(crate) fn serialize_python_file(
 // Used to report which imports are used in a file
 struct Import {
     name: String,
-    relative: i32,  // Number of dots in relative import 'import ..x'
-    as_name: Option<String>,  // Set for 'import x as y'
+    relative: i32,           // Number of dots in relative import 'import ..x'
+    as_name: Option<String>, // Set for 'import x as y'
 }
 
 // Used to report which from...import statements are used in a file
 struct ImportFrom {
-    module: String,  // Module being imported from (empty string for "from . import x")
-    relative: i32,   // Number of dots in relative import
-    names: Vec<(String, Option<String>)>,  // List of (name, as_name) tuples
+    module: String, // Module being imported from (empty string for "from . import x")
+    relative: i32,  // Number of dots in relative import
+    names: Vec<(String, Option<String>)>, // List of (name, as_name) tuples
 }
 
 struct Serializer<'a> {
     bytes: Vec<u8>,
-    imports: Vec<Import>,  // Encountered import statements
-    import_froms: Vec<ImportFrom>,  // Encountered from...import statements
+    imports: Vec<Import>,          // Encountered import statements
+    import_froms: Vec<ImportFrom>, // Encountered from...import statements
     line_index: LineIndex,
     text: &'a str,
-    skip_function_bodies: bool,  // Whether to omit function bodies without visible effects
-    in_class: bool,  // Whether we're currently inside a class definition
-    is_all_ascii: bool,  // Whether the entire file contains only ASCII characters
-    lines_with_non_ascii: Vec<bool>,  // Per-line flags: true if line has non-ASCII (empty if is_all_ascii)
-    type_comments: HashMap<usize, ast::Expr>,  // Type comments by line number (1-indexed)
+    skip_function_bodies: bool, // Whether to omit function bodies without visible effects
+    in_class: bool,             // Whether we're currently inside a class definition
+    is_all_ascii: bool,         // Whether the entire file contains only ASCII characters
+    lines_with_non_ascii: Vec<bool>, // Per-line flags: true if line has non-ASCII (empty if is_all_ascii)
+    type_comments: HashMap<usize, ast::Expr>, // Type comments by line number (1-indexed)
 }
 
 impl<'a> Serializer<'a> {
@@ -263,7 +257,11 @@ impl<'a> Serializer<'a> {
     }
 
     fn write_bool(&mut self, b: bool) {
-        self.bytes.push(if b { TAG_LITERAL_TRUE } else { TAG_LITERAL_FALSE });
+        self.bytes.push(if b {
+            TAG_LITERAL_TRUE
+        } else {
+            TAG_LITERAL_FALSE
+        });
     }
 
     fn write_int(&mut self, i: i64) {
@@ -282,7 +280,11 @@ impl<'a> Serializer<'a> {
             // Variable-length format
             self.bytes.push(LONG_INT_TRAILER);
             let neg = i < 0;
-            let absval = if neg { i.wrapping_abs() as u64 } else { i as u64 };
+            let absval = if neg {
+                i.wrapping_abs() as u64
+            } else {
+                i as u64
+            };
             let bytes = absval.to_le_bytes();
             let mut n = bytes.len();
             while n > 1 && bytes[n - 1] == 0 {
@@ -356,17 +358,19 @@ impl<'a> Serializer<'a> {
         // Note: Ruff uses 1-based columns, but mypy expects 0-based, so subtract 1
         if self.is_all_ascii {
             self.write_int(st_line);
-            self.write_int((st_column_bytes - 1) as i64);  // Convert to 0-based
+            self.write_int((st_column_bytes - 1) as i64); // Convert to 0-based
             self.write_int((end_loc.line.get() as i64) - st_line);
             self.write_int((end_column_bytes as i64) - (st_column_bytes as i64));
         } else {
             // Convert byte offset to code point offset for Python compatibility
             // Note: Ruff uses 1-based columns, but mypy expects 0-based, so subtract 1
-            let st_column = self.convert_column_to_codepoint(st_loc.line.get(), st_column_bytes) as i64;
-            let end_column = self.convert_column_to_codepoint(end_loc.line.get(), end_column_bytes) as i64;
+            let st_column =
+                self.convert_column_to_codepoint(st_loc.line.get(), st_column_bytes) as i64;
+            let end_column =
+                self.convert_column_to_codepoint(end_loc.line.get(), end_column_bytes) as i64;
 
             self.write_int(st_line);
-            self.write_int(st_column - 1);  // Convert to 0-based
+            self.write_int(st_column - 1); // Convert to 0-based
             self.write_int((end_loc.line.get() as i64) - st_line);
             self.write_int(end_column - st_column);
         }
@@ -385,8 +389,8 @@ impl<'a> Serializer<'a> {
     fn serialize_empty_block(&mut self, range: TextRange) {
         self.write_tag(TAG_BLOCK);
         self.write_tag(TAG_LIST_GEN);
-        self.write_int(0);  // Empty list of statements
-        self.write_location(range);  // Write location after zero-length list
+        self.write_int(0); // Empty list of statements
+        self.write_location(range); // Write location after zero-length list
         self.write_end_tag();
     }
 }
@@ -481,7 +485,8 @@ fn extract_type_comments_and_ignores(
                     // Type annotation comment - parse the type string into an AST expression
                     // Similar to how serialize_string_type parses forward references
                     let wrapped = format!("({})", annotation);
-                    let parse_result = parse_unchecked(&wrapped, ParseOptions::from(Mode::Expression));
+                    let parse_result =
+                        parse_unchecked(&wrapped, ParseOptions::from(Mode::Expression));
 
                     // Only store if parsing succeeded
                     if parse_result.errors().is_empty() {
@@ -525,7 +530,6 @@ fn serialize_bytes_to_escaped_string(bytes_lit: &ast::ExprBytesLiteral) -> Vec<u
     }
     result
 }
-
 
 /// Helper function to serialize comprehensions (shared by Generator, ListComp, SetComp)
 fn serialize_comprehension(
@@ -583,13 +587,27 @@ fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
 
     // Serialize positional-only arguments
     for param in &params.posonlyargs {
-        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, true);
+        serialize_argument(
+            ser,
+            &param.parameter,
+            param.default.as_deref(),
+            ARG_POS,
+            ARG_OPT,
+            true,
+        );
     }
 
     // Serialize regular positional arguments
     for param in &params.args {
         let pos_only = argument_elide_name(&param.parameter.name);
-        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_POS, ARG_OPT, pos_only);
+        serialize_argument(
+            ser,
+            &param.parameter,
+            param.default.as_deref(),
+            ARG_POS,
+            ARG_OPT,
+            pos_only,
+        );
     }
 
     // Serialize *args
@@ -599,7 +617,14 @@ fn serialize_parameters(ser: &mut Serializer, params: &ast::Parameters) {
 
     // Serialize keyword-only arguments
     for param in &params.kwonlyargs {
-        serialize_argument(ser, &param.parameter, param.default.as_deref(), ARG_NAMED, ARG_NAMED_OPT, false);
+        serialize_argument(
+            ser,
+            &param.parameter,
+            param.default.as_deref(),
+            ARG_NAMED,
+            ARG_NAMED_OPT,
+            false,
+        );
     }
 
     // Serialize **kwargs
@@ -662,8 +687,9 @@ impl Ser for ast::Stmt {
                     }
                     // Serialize start location of the decorator. End is same as the func def.
                     // Note: Decorator column intentionally uses 1-based (legacy parser behavior)
-                    let start_loc = ser.line_index.line_column(
-                        f.decorator_list.first().unwrap().range().start(), ser.text);
+                    let start_loc = ser
+                        .line_index
+                        .line_column(f.decorator_list.first().unwrap().range().start(), ser.text);
                     ser.write_tagged_int(start_loc.line.get() as i64);
                     ser.write_tagged_int(start_loc.column.get() as i64);
                 }
@@ -683,7 +709,7 @@ impl Ser for ast::Stmt {
                     func_effect_visitor::has_externally_visible_effect(
                         &f.body,
                         &f.parameters,
-                        ser.in_class,  // Only check attributes for methods in classes
+                        ser.in_class, // Only check attributes for methods in classes
                     )
                 } else {
                     true
@@ -824,8 +850,8 @@ impl Ser for ast::Stmt {
                     }
                     ser.imports.push(Import {
                         name: name.name.to_string(),
-                        relative: 0,  // Not a relative import
-                        as_name: name.asname.as_ref().map(|n| n.to_string())
+                        relative: 0, // Not a relative import
+                        as_name: name.asname.as_ref().map(|n| n.to_string()),
                     });
                 }
                 ser.write_location(i.range());
@@ -872,13 +898,16 @@ impl Ser for ast::Stmt {
                         // Collect for dependency tracking
                         names.push((
                             alias.name.to_string(),
-                            alias.asname.as_ref().map(|n| n.to_string())
+                            alias.asname.as_ref().map(|n| n.to_string()),
                         ));
                     }
 
                     // Track in import_froms list for dependency tracking
                     ser.import_froms.push(ImportFrom {
-                        module: ifrom.module.as_ref().map_or(String::new(), |m| m.to_string()),
+                        module: ifrom
+                            .module
+                            .as_ref()
+                            .map_or(String::new(), |m| m.to_string()),
                         relative: ifrom.level as i32,
                         names,
                     });
@@ -1018,9 +1047,8 @@ impl Ser for ast::Stmt {
                 ser.write_tag(TAG_DICT_STR_GEN);
                 if let Some(args) = &c.arguments {
                     // Count keywords with argument names (exclude **kwargs which have no arg)
-                    let named_keywords: Vec<_> = args.keywords.iter()
-                        .filter(|kw| kw.arg.is_some())
-                        .collect();
+                    let named_keywords: Vec<_> =
+                        args.keywords.iter().filter(|kw| kw.arg.is_some()).collect();
                     ser.write_int(named_keywords.len() as i64);
 
                     // Serialize each keyword: name then value
@@ -1040,7 +1068,9 @@ impl Ser for ast::Stmt {
                     ser.write_tag(TAG_LOCATION);
 
                     let last_decorator = c.decorator_list.last().unwrap();
-                    let decorator_loc = ser.line_index.line_column(last_decorator.range().start(), ser.text);
+                    let decorator_loc = ser
+                        .line_index
+                        .line_column(last_decorator.range().start(), ser.text);
                     let name_loc = ser.line_index.line_column(c.name.range.start(), ser.text);
                     let end_loc = ser.line_index.line_column(c.range().end(), ser.text);
 
@@ -1223,9 +1253,9 @@ impl Ser for ast::Expr {
                 }
                 for kwarg in &args.keywords {
                     if kwarg.arg.is_none() {
-                        ser.write_int(ARG_STAR2);  // **kwargs
+                        ser.write_int(ARG_STAR2); // **kwargs
                     } else {
-                        ser.write_int(ARG_NAMED);  // keyword arg
+                        ser.write_int(ARG_NAMED); // keyword arg
                     }
                 }
 
@@ -1621,7 +1651,10 @@ fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
                     ser.write_bytes(b"builtins.int");
                     ser.write_tagged_int(int_val);
                 } else {
-                    panic!("Integer literal in type annotation too large for i64: {:?}", n.value);
+                    panic!(
+                        "Integer literal in type annotation too large for i64: {:?}",
+                        n.value
+                    );
                 }
             } else {
                 panic!("unsupported number literal in type: {:?}", n);
@@ -1706,7 +1739,7 @@ fn serialize_type(ser: &mut Serializer, t: &ast::Expr) {
 
             // Try to parse the string as a type expression
             serialize_string_type(ser, &string_value, s.range());
-            return;  // serialize_string_type handles location and end tag
+            return; // serialize_string_type handles location and end tag
         }
         ast::Expr::BytesLiteral(bytes_lit) => {
             // Bytes literals in type context (e.g., Literal[b"foo"])
@@ -1757,7 +1790,12 @@ fn serialize_string_type(ser: &mut Serializer, string_value: &str, range: TextRa
                     return;
                 }
                 ast::Expr::Attribute(_e) => {
-                    serialize_attribute_type(ser, expr.as_ref(), Some(string_value), Some("builtins.str"));
+                    serialize_attribute_type(
+                        ser,
+                        expr.as_ref(),
+                        Some(string_value),
+                        Some("builtins.str"),
+                    );
                     ser.write_location(range);
                     ser.write_end_tag();
                     return;
@@ -1770,7 +1808,13 @@ fn serialize_string_type(ser: &mut Serializer, string_value: &str, range: TextRa
                 }
                 ast::Expr::BinOp(binop) if matches!(binop.op, ast::Operator::BitOr) => {
                     // Serialize as UnionType with original_str_expr and original_str_fallback
-                    serialize_union_type(ser, binop, range, Some(string_value), Some("builtins.str"));
+                    serialize_union_type(
+                        ser,
+                        binop,
+                        range,
+                        Some(string_value),
+                        Some("builtins.str"),
+                    );
                     return;
                 }
                 _ => {
@@ -2052,7 +2096,7 @@ mod tests {
         assert_eq!(ser.lines_with_non_ascii.len(), 4);
         assert!(!ser.lines_with_non_ascii[0]); // ASCII line
         assert!(!ser.lines_with_non_ascii[1]); // ASCII line
-        assert!(ser.lines_with_non_ascii[2]);  // Unicode line
+        assert!(ser.lines_with_non_ascii[2]); // Unicode line
         assert!(!ser.lines_with_non_ascii[3]); // ASCII line
     }
 
@@ -2097,7 +2141,7 @@ mod tests {
         assert_eq!(ser.lines_with_non_ascii.len(), 4);
         assert!(!ser.lines_with_non_ascii[0]); // ASCII line with CRLF
         assert!(!ser.lines_with_non_ascii[1]); // ASCII line with LF
-        assert!(ser.lines_with_non_ascii[2]);  // Unicode line with CRLF
+        assert!(ser.lines_with_non_ascii[2]); // Unicode line with CRLF
         assert!(!ser.lines_with_non_ascii[3]); // ASCII line with LF
     }
 
@@ -2108,7 +2152,7 @@ mod tests {
         let ast = parse_unchecked(text, opt).into_syntax();
         let mut ser = make_ser(text);
         ast.serialize(&mut ser);
-        let _ = ser;  // TODO: drop when not needed
+        let _ = ser; // TODO: drop when not needed
 
         let expected = &[
             TAG_LITERAL_INT,
@@ -2147,7 +2191,7 @@ mod tests {
             TAG_END,
             TAG_LIST_INT,
             int_val(1),
-            int_val(0),  // ARG_POS
+            int_val(0), // ARG_POS
             TAG_LIST_GEN,
             int_val(1),
             TAG_LITERAL_NONE,
