@@ -4,7 +4,6 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use ruff_linter::source_kind::SourceKind;
 use ruff_python_ast::{PySourceType, Number};
 use ruff_python_ast::{self as ast};
 use ruff_python_parser::{Mode, ParseOptions, parse_unchecked};
@@ -151,15 +150,8 @@ pub(crate) fn serialize_python_file(
     skip_function_bodies: bool,
 ) -> Result<(Vec<u8>, Vec<SyntaxError>, Vec<(usize, Vec<String>)>)> {
     let source_type = PySourceType::from(file_path);
-    let source_kind = SourceKind::from_path(file_path, source_type)?.ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not determine source kind for file: {}",
-            file_path.display()
-        )
-    })?;
-
-    let line_index = LineIndex::from_source_text(source_kind.source_code());
-    let source_text = source_kind.source_code();
+    let source_text = std::fs::read_to_string(file_path)?;
+    let line_index = LineIndex::from_source_text(&source_text);
 
     // Check if file is all ASCII and build per-line non-ASCII flags if needed
     let is_all_ascii = source_text.is_ascii();
@@ -174,14 +166,14 @@ pub(crate) fn serialize_python_file(
     };
 
     // Parse the file - this always returns a result, even with syntax errors
-    let parsed = parse_unchecked(source_text, ParseOptions::from(source_type));
+    let parsed = parse_unchecked(&source_text, ParseOptions::from(source_type));
 
     // Extract syntax errors with location information
     let syntax_errors: Vec<SyntaxError> = parsed
         .errors()
         .iter()
         .map(|error| {
-            let location = line_index.line_column(error.location.start(), source_text);
+            let location = line_index.line_column(error.location.start(), &source_text);
             SyntaxError {
                 line: location.line.get(),
                 column: location.column.get(),
@@ -193,7 +185,7 @@ pub(crate) fn serialize_python_file(
     // Extract both type: ignore comments and type annotation comments in a single pass
     let (type_ignore_lines, type_comments) = extract_type_comments_and_ignores(
         parsed.tokens(),
-        source_text,
+        &source_text,
         &line_index,
     );
 
@@ -203,7 +195,7 @@ pub(crate) fn serialize_python_file(
         imports: Vec::new(),
         import_froms: Vec::new(),
         line_index,
-        text: source_text,
+        text: &source_text,
         skip_function_bodies,
         in_class: false,
         is_all_ascii,
