@@ -669,6 +669,7 @@ impl Ser for ast::Stmt {
                         dec.expression.serialize(ser);
                     }
                     // Serialize start location of the decorator. End is same as the func def.
+                    // Note: Decorator column intentionally uses 1-based (legacy parser behavior)
                     let start_loc = ser.line_index.line_column(
                         f.decorator_list.first().unwrap().range().start(), ser.text);
                     ser.write_tagged_int(start_loc.line.get() as i64);
@@ -723,24 +724,27 @@ impl Ser for ast::Stmt {
 
                 // Write location
                 if !f.decorator_list.is_empty() {
-                    // Custom location: use function name's line with last decorator's column
+                    // For decorated functions, compute def keyword position from function name
+                    // Assuming single space between tokens: "def " or "async def "
                     ser.write_tag(TAG_LOCATION);
 
-                    let last_decorator = f.decorator_list.last().unwrap();
-                    let decorator_loc = ser.line_index.line_column(last_decorator.range().start(), ser.text);
                     let name_loc = ser.line_index.line_column(f.name.range.start(), ser.text);
                     let end_loc = ser.line_index.line_column(f.range().end(), ser.text);
 
-                    // Start: name's line, decorator's column
+                    // Compute def keyword column by subtracting offset from name position
+                    // "def " = 4 characters, "async def " = 10 characters
+                    // Note: Ruff uses 1-based columns, convert to 0-based for mypy
+                    let def_offset = if f.is_async { 10 } else { 4 };
+                    let def_column = (name_loc.column.get() - 1) as i64 - def_offset;
+
                     let st_line = name_loc.line.get() as i64;
-                    let st_column = decorator_loc.column.get() as i64;
 
                     ser.write_int(st_line);
-                    ser.write_int(st_column);
+                    ser.write_int(def_column);
 
                     // End deltas (relative to start)
                     ser.write_int((end_loc.line.get() as i64) - st_line);
-                    ser.write_int((end_loc.column.get() as i64) - st_column);
+                    ser.write_int((end_loc.column.get() - 1) as i64 - def_column);
                 } else {
                     // No decorators: use the full range (already starts at async/def)
                     ser.write_location(f.range());
@@ -1049,15 +1053,16 @@ impl Ser for ast::Stmt {
                     let end_loc = ser.line_index.line_column(c.range().end(), ser.text);
 
                     // Start: name's line, decorator's column
+                    // Note: Ruff uses 1-based columns, convert to 0-based for mypy
                     let st_line = name_loc.line.get() as i64;
-                    let st_column = decorator_loc.column.get() as i64;
+                    let st_column = (decorator_loc.column.get() - 1) as i64;
 
                     ser.write_int(st_line);
                     ser.write_int(st_column);
 
                     // End deltas (relative to start)
                     ser.write_int((end_loc.line.get() as i64) - st_line);
-                    ser.write_int((end_loc.column.get() as i64) - st_column);
+                    ser.write_int((end_loc.column.get() - 1) as i64 - st_column);
                 } else {
                     // No decorators: use the full range
                     ser.write_location(c.range());
