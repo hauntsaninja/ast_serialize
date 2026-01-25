@@ -1025,7 +1025,13 @@ impl Ser for ast::Stmt {
                 // Body - mark that we're inside a class
                 let was_in_class = ser.in_class;
                 ser.in_class = true;
-                ser.serialize_block(&c.body);
+                if c.body.is_empty() {
+                    // Empty body due to syntax error - use serialize_empty_block
+                    // to ensure location is written (required by deserializer)
+                    ser.serialize_empty_block(c.range());
+                } else {
+                    ser.serialize_block(&c.body);
+                }
                 ser.in_class = was_in_class;
 
                 // Base classes (positional arguments in class definition)
