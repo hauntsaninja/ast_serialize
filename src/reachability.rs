@@ -48,14 +48,54 @@ pub fn consider_sys_platform(_expr: &ast::Expr, _platform: &str) -> TruthValue {
 
 /// Infer whether the given condition is always true/false.
 pub fn infer_condition_value(
-    _expr: &ast::Expr,
-    _python_version: (u32, u32),
-    _platform: &str,
-    _always_true: &[String],
-    _always_false: &[String],
+    expr: &ast::Expr,
+    python_version: (u32, u32),
+    platform: &str,
+    always_true: &[String],
+    always_false: &[String],
 ) -> TruthValue {
-    // TODO: Implement condition value inference
-    TruthValue::TruthValueUnknown
+    match expr {
+        // Handle unary "not" expressions
+        ast::Expr::UnaryOp(unary) if matches!(unary.op, ast::UnaryOp::Not) => {
+            // TODO: Recursively infer and invert
+            TruthValue::TruthValueUnknown
+        }
+
+        // Handle name expressions (e.g., PY3, MYPY, TYPE_CHECKING)
+        ast::Expr::Name(_name) => {
+            // TODO: Check for special names and always_true/always_false lists
+            TruthValue::TruthValueUnknown
+        }
+
+        // Handle attribute expressions (e.g., sys.platform, sys.version_info)
+        ast::Expr::Attribute(_attr) => {
+            // TODO: Extract attribute name and check special cases
+            TruthValue::TruthValueUnknown
+        }
+
+        // Handle boolean operations (and/or)
+        ast::Expr::BoolOp(bool_op) => {
+            match bool_op.op {
+                ast::BoolOp::And => {
+                    // TODO: Implement and logic
+                    TruthValue::TruthValueUnknown
+                }
+                ast::BoolOp::Or => {
+                    // TODO: Implement or logic
+                    TruthValue::TruthValueUnknown
+                }
+            }
+        }
+
+        // Fallback: try sys.version_info and sys.platform checks
+        _ => {
+            let result = consider_sys_version_info(expr, python_version);
+            if result != TruthValue::TruthValueUnknown {
+                return result;
+            }
+            consider_sys_platform(expr, platform)
+        }
+    }
 }
 
 #[cfg(test)]
