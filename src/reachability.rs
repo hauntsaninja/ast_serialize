@@ -31,6 +31,17 @@ impl TruthValue {
     }
 }
 
+/// Check if a name corresponds to a special constant with known truth value.
+fn check_name_truth_value(name: &str, _always_true: &[String], _always_false: &[String]) -> TruthValue {
+    match name {
+        "MYPY" | "TYPE_CHECKING" => TruthValue::MypyTrue,
+        "PY2" => TruthValue::AlwaysFalse,
+        "PY3" => TruthValue::AlwaysTrue,
+        // TODO: Check always_true/always_false lists
+        _ => TruthValue::TruthValueUnknown,
+    }
+}
+
 /// Consider whether expr is a comparison involving sys.version_info.
 pub fn consider_sys_version_info(
     _expr: &ast::Expr,
@@ -68,21 +79,10 @@ pub fn infer_condition_value(
         }
 
         // Handle name expressions (e.g., PY3, MYPY, TYPE_CHECKING)
-        ast::Expr::Name(name) => {
-            match name.id.as_str() {
-                "MYPY" | "TYPE_CHECKING" => TruthValue::MypyTrue,
-                "PY2" => TruthValue::AlwaysFalse,
-                "PY3" => TruthValue::AlwaysTrue,
-                // TODO: Check always_true/always_false lists
-                _ => TruthValue::TruthValueUnknown,
-            }
-        }
+        ast::Expr::Name(name) => check_name_truth_value(name.id.as_str(), always_true, always_false),
 
-        // Handle attribute expressions (e.g., sys.platform, sys.version_info)
-        ast::Expr::Attribute(_attr) => {
-            // TODO: Extract attribute name and check special cases
-            TruthValue::TruthValueUnknown
-        }
+        // Handle attribute expressions (e.g., typing.TYPE_CHECKING, sys.platform)
+        ast::Expr::Attribute(attr) => check_name_truth_value(attr.attr.as_str(), always_true, always_false),
 
         // Handle boolean operations (and/or)
         ast::Expr::BoolOp(bool_op) => {
@@ -171,5 +171,14 @@ mod tests {
         assert_eq!(infer_expr("not PY2"), TruthValue::AlwaysTrue);
         assert_eq!(infer_expr("not PY3"), TruthValue::AlwaysFalse);
         assert_eq!(infer_expr("not foo"), TruthValue::TruthValueUnknown);
+    }
+
+    #[test]
+    fn test_attribute_expressions() {
+        assert_eq!(infer_expr("typing.TYPE_CHECKING"), TruthValue::MypyTrue);
+        assert_eq!(infer_expr("foo.MYPY"), TruthValue::MypyTrue);
+        assert_eq!(infer_expr("bar.PY2"), TruthValue::AlwaysFalse);
+        assert_eq!(infer_expr("baz.PY3"), TruthValue::AlwaysTrue);
+        assert_eq!(infer_expr("sys.platform"), TruthValue::TruthValueUnknown);
     }
 }
