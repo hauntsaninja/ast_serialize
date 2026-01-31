@@ -285,23 +285,64 @@ pub fn consider_sys_version_info(expr: &ast::Expr, python_version: (u32, u32)) -
         return TruthValue::TruthValueUnknown;
     };
 
-    // Handle sys.version_info[i] <compare_op> k
-    if let (SysVersionInfo::Index(idx), IntOrTuple::Int(value)) = (index, thing) {
-        if idx >= 0 && idx <= 1 {
-            let version_component = if idx == 0 {
-                python_version.0 as i32
+    match (index, thing) {
+        // Handle sys.version_info[i] <compare_op> k
+        (SysVersionInfo::Index(idx), IntOrTuple::Int(value)) => {
+            if idx >= 0 && idx <= 1 {
+                let version_component = if idx == 0 {
+                    python_version.0 as i32
+                } else {
+                    python_version.1 as i32
+                };
+                return fixed_comparison(version_component, op, value);
             } else {
-                python_version.1 as i32
-            };
-            return fixed_comparison(version_component, op, value);
-        } else {
-            return TruthValue::TruthValueUnknown;
+                return TruthValue::TruthValueUnknown;
+            }
         }
+
+        // Handle sys.version_info[lo:hi] <compare_op> tuple or sys.version_info <compare_op> tuple
+        (index, IntOrTuple::Tuple(target_tuple)) => {
+            let (lo, hi) = match index {
+                SysVersionInfo::Slice(begin, end) => {
+                    let lo = begin.unwrap_or(0);
+                    let hi = end.unwrap_or(2);
+                    (lo, hi)
+                }
+                SysVersionInfo::Whole => (0, 2), // sys.version_info is same as [0:2]
+                _ => return TruthValue::TruthValueUnknown,
+            };
+
+            // Validate bounds: 0 <= lo < hi <= 2
+            if lo < 0 || hi > 2 || lo >= hi {
+                return TruthValue::TruthValueUnknown;
+            }
+
+            // Extract version slice
+            let version_slice: Vec<i32> = match (lo, hi) {
+                (0, 1) => vec![python_version.0 as i32],
+                (0, 2) => vec![python_version.0 as i32, python_version.1 as i32],
+                (1, 2) => vec![python_version.1 as i32],
+                _ => return TruthValue::TruthValueUnknown,
+            };
+
+            // Check length compatibility
+            let version_len = version_slice.len();
+            let target_len = target_tuple.len();
+
+            // Allow comparison if lengths match, or if version is longer and op is not == or !=
+            if version_len == target_len
+                || (version_len > target_len && !matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq))
+            {
+                // Compare tuples lexicographically
+                return fixed_comparison(version_slice.as_slice(), op, target_tuple.as_slice());
+            }
+
+            TruthValue::TruthValueUnknown
+        }
+
+        // Other combinations not supported
+        _ => TruthValue::TruthValueUnknown,
     }
-
-    // TODO: Handle tuple comparisons (sys.version_info[lo:hi] <compare_op> tuple)
-
-    TruthValue::TruthValueUnknown
 }
 
 /// Consider whether expr is a comparison involving sys.platform.
@@ -629,6 +670,54 @@ mod tests {
         assert_eq!(
             consider_sys_version_info(&parse_expr("2 < sys.version_info[0] < 4"), (3, 10)),
             TruthValue::TruthValueUnknown
+        );
+
+        // Tuple comparisons: sys.version_info >= (3, 8)
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info >= (3, 8)"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: sys.version_info >= (3, 10) - exact boundary
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info >= (3, 10)"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: sys.version_info < (3, 10) - exact boundary
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info < (3, 10)"), (3, 10)),
+            TruthValue::AlwaysFalse
+        );
+
+        // Tuple comparisons: sys.version_info[:2] >= (3, 8)
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info[:2] >= (3, 8)"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: sys.version_info[0:2] >= (3, 10)
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info[0:2] >= (3, 10)"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: reversed operands
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("(3, 8) <= sys.version_info"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: single element tuple with slice
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info[:1] >= (3,)"), (3, 10)),
+            TruthValue::AlwaysTrue
+        );
+
+        // Tuple comparisons: version longer than target (allowed for ordering)
+        assert_eq!(
+            consider_sys_version_info(&parse_expr("sys.version_info >= (3,)"), (3, 10)),
+            TruthValue::AlwaysTrue
         );
     }
 
