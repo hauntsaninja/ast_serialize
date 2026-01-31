@@ -31,6 +31,27 @@ impl TruthValue {
     }
 }
 
+/// Perform a fixed comparison between two values with a given operator.
+/// Returns AlwaysTrue if the comparison is true, AlwaysFalse if false.
+fn fixed_comparison<T: PartialOrd>(left: T, op: ast::CmpOp, right: T) -> TruthValue {
+    let result = match op {
+        ast::CmpOp::Eq => left == right,
+        ast::CmpOp::NotEq => left != right,
+        ast::CmpOp::Lt => left < right,
+        ast::CmpOp::LtE => left <= right,
+        ast::CmpOp::Gt => left > right,
+        ast::CmpOp::GtE => left >= right,
+        // Other operators don't apply in this context
+        _ => return TruthValue::TruthValueUnknown,
+    };
+
+    if result {
+        TruthValue::AlwaysTrue
+    } else {
+        TruthValue::AlwaysFalse
+    }
+}
+
 /// Check if an expression is an attribute access on 'sys' with the given name.
 /// For example, `is_sys_attr(expr, "platform")` returns true for `sys.platform`.
 fn is_sys_attr(expr: &ast::Expr, name: &str) -> bool {
@@ -290,5 +311,115 @@ mod tests {
 
         // Mixed with unknown -> unknown
         assert_eq!(infer_expr("foo and bar"), TruthValue::TruthValueUnknown);
+    }
+
+    #[test]
+    fn test_is_sys_attr() {
+        use ruff_python_parser::{Mode, ParseOptions, parse_unchecked};
+
+        let parse_expr = |code: &str| {
+            let parsed = parse_unchecked(code, ParseOptions::from(Mode::Expression));
+            let ast::Mod::Expression(expr_mod) = parsed.into_syntax() else {
+                panic!("Expected expression");
+            };
+            expr_mod.body
+        };
+
+        // Positive cases: sys.platform and sys.version_info
+        assert!(is_sys_attr(&parse_expr("sys.platform"), "platform"));
+        assert!(is_sys_attr(&parse_expr("sys.version_info"), "version_info"));
+
+        // Wrong attribute name
+        assert!(!is_sys_attr(&parse_expr("sys.platform"), "version_info"));
+        assert!(!is_sys_attr(&parse_expr("sys.version_info"), "platform"));
+
+        // Not sys module
+        assert!(!is_sys_attr(&parse_expr("foo.platform"), "platform"));
+        assert!(!is_sys_attr(&parse_expr("os.platform"), "platform"));
+
+        // Not an attribute expression
+        assert!(!is_sys_attr(&parse_expr("platform"), "platform"));
+        assert!(!is_sys_attr(&parse_expr("sys"), "sys"));
+    }
+
+    #[test]
+    fn test_fixed_comparison() {
+        // Equality with strings
+        assert_eq!(
+            fixed_comparison("linux", ast::CmpOp::Eq, "linux"),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison("linux", ast::CmpOp::Eq, "win32"),
+            TruthValue::AlwaysFalse
+        );
+
+        // Inequality with strings
+        assert_eq!(
+            fixed_comparison("linux", ast::CmpOp::NotEq, "win32"),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison("linux", ast::CmpOp::NotEq, "linux"),
+            TruthValue::AlwaysFalse
+        );
+
+        // Less than with integers
+        assert_eq!(
+            fixed_comparison(3, ast::CmpOp::Lt, 10),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison(10, ast::CmpOp::Lt, 3),
+            TruthValue::AlwaysFalse
+        );
+        assert_eq!(
+            fixed_comparison(5, ast::CmpOp::Lt, 5),
+            TruthValue::AlwaysFalse
+        );
+
+        // Less than or equal with integers
+        assert_eq!(
+            fixed_comparison(3, ast::CmpOp::LtE, 10),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison(5, ast::CmpOp::LtE, 5),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison(10, ast::CmpOp::LtE, 3),
+            TruthValue::AlwaysFalse
+        );
+
+        // Greater than with strings
+        assert_eq!(
+            fixed_comparison("b", ast::CmpOp::Gt, "a"),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison("a", ast::CmpOp::Gt, "b"),
+            TruthValue::AlwaysFalse
+        );
+
+        // Greater than or equal with integers
+        assert_eq!(
+            fixed_comparison(10, ast::CmpOp::GtE, 3),
+            TruthValue::AlwaysTrue
+        );
+        assert_eq!(
+            fixed_comparison(5, ast::CmpOp::GtE, 5),
+            TruthValue::AlwaysTrue
+        );
+
+        // Unsupported operators return unknown
+        assert_eq!(
+            fixed_comparison("a", ast::CmpOp::In, "b"),
+            TruthValue::TruthValueUnknown
+        );
+        assert_eq!(
+            fixed_comparison(1, ast::CmpOp::Is, 2),
+            TruthValue::TruthValueUnknown
+        );
     }
 }
