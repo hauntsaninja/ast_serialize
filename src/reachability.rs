@@ -31,6 +31,21 @@ impl TruthValue {
     }
 }
 
+/// Consider whether expr is a comparison involving sys.version_info.
+pub fn consider_sys_version_info(
+    _expr: &ast::Expr,
+    _python_version: (u32, u32),
+) -> TruthValue {
+    // TODO: Implement sys.version_info inference
+    TruthValue::TruthValueUnknown
+}
+
+/// Consider whether expr is a comparison involving sys.platform.
+pub fn consider_sys_platform(_expr: &ast::Expr, _platform: &str) -> TruthValue {
+    // TODO: Implement sys.platform inference
+    TruthValue::TruthValueUnknown
+}
+
 /// Infer whether the given condition is always true/false.
 pub fn infer_condition_value(
     _expr: &ast::Expr,
@@ -40,7 +55,6 @@ pub fn infer_condition_value(
     _always_false: &[String],
 ) -> TruthValue {
     // TODO: Implement condition value inference
-    // This is a placeholder that always returns unknown
     TruthValue::TruthValueUnknown
 }
 
