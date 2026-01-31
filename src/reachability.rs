@@ -139,9 +139,35 @@ pub fn consider_sys_version_info(
 }
 
 /// Consider whether expr is a comparison involving sys.platform.
-pub fn consider_sys_platform(_expr: &ast::Expr, _platform: &str) -> TruthValue {
-    // TODO: Implement sys.platform inference
-    TruthValue::TruthValueUnknown
+pub fn consider_sys_platform(expr: &ast::Expr, platform: &str) -> TruthValue {
+    match expr {
+        ast::Expr::Compare(compare) => {
+            // Don't support chained comparisons
+            if compare.ops.len() > 1 {
+                return TruthValue::TruthValueUnknown;
+            }
+
+            let op = compare.ops[0];
+            // Only support == and !=
+            if !matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq) {
+                return TruthValue::TruthValueUnknown;
+            }
+
+            // Check if left operand is sys.platform
+            if !is_sys_attr(&compare.left, "platform") {
+                return TruthValue::TruthValueUnknown;
+            }
+
+            // Check if right operand is a string literal
+            if let ast::Expr::StringLiteral(string_lit) = &compare.comparators[0] {
+                return fixed_comparison(platform, op, string_lit.value.to_str());
+            }
+
+            TruthValue::TruthValueUnknown
+        }
+        // TODO: Implement CallExpr for startswith
+        _ => TruthValue::TruthValueUnknown,
+    }
 }
 
 /// Infer whether the given condition is always true/false.
@@ -340,6 +366,61 @@ mod tests {
         // Not an attribute expression
         assert!(!is_sys_attr(&parse_expr("platform"), "platform"));
         assert!(!is_sys_attr(&parse_expr("sys"), "sys"));
+    }
+
+    #[test]
+    fn test_consider_sys_platform() {
+        use ruff_python_parser::{Mode, ParseOptions, parse_unchecked};
+
+        let parse_expr = |code: &str| {
+            let parsed = parse_unchecked(code, ParseOptions::from(Mode::Expression));
+            let ast::Mod::Expression(expr_mod) = parsed.into_syntax() else {
+                panic!("Expected expression");
+            };
+            expr_mod.body
+        };
+
+        // sys.platform == "linux" on linux platform
+        assert_eq!(
+            consider_sys_platform(&parse_expr("sys.platform == 'linux'"), "linux"),
+            TruthValue::AlwaysTrue
+        );
+
+        // sys.platform == "win32" on linux platform
+        assert_eq!(
+            consider_sys_platform(&parse_expr("sys.platform == 'win32'"), "linux"),
+            TruthValue::AlwaysFalse
+        );
+
+        // sys.platform != "win32" on linux platform
+        assert_eq!(
+            consider_sys_platform(&parse_expr("sys.platform != 'win32'"), "linux"),
+            TruthValue::AlwaysTrue
+        );
+
+        // sys.platform != "linux" on linux platform
+        assert_eq!(
+            consider_sys_platform(&parse_expr("sys.platform != 'linux'"), "linux"),
+            TruthValue::AlwaysFalse
+        );
+
+        // Unsupported: other comparison operators
+        assert_eq!(
+            consider_sys_platform(&parse_expr("sys.platform < 'linux'"), "linux"),
+            TruthValue::TruthValueUnknown
+        );
+
+        // Unsupported: not sys.platform
+        assert_eq!(
+            consider_sys_platform(&parse_expr("foo.platform == 'linux'"), "linux"),
+            TruthValue::TruthValueUnknown
+        );
+
+        // Unsupported: chained comparisons
+        assert_eq!(
+            consider_sys_platform(&parse_expr("'a' < sys.platform < 'z'"), "linux"),
+            TruthValue::TruthValueUnknown
+        );
     }
 
     #[test]
