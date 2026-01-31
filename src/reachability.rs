@@ -18,6 +18,17 @@ pub enum TruthValue {
     TruthValueUnknown = 5,
 }
 
+/// Represents different forms of sys.version_info access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SysVersionInfo {
+    /// sys.version_info (whole tuple, same as sys.version_info[:])
+    Whole,
+    /// sys.version_info[index] (single element access)
+    Index(i32),
+    /// sys.version_info[begin:end] (slice access)
+    Slice(Option<i32>, Option<i32>),
+}
+
 impl TruthValue {
     /// Returns the inverted truth value (for handling `not` expressions).
     pub fn invert(self) -> Self {
@@ -52,6 +63,16 @@ fn fixed_comparison<T: PartialOrd>(left: T, op: ast::CmpOp, right: T) -> TruthVa
     }
 }
 
+/// Extract an integer value from a NumberLiteral expression.
+fn expr_to_int(expr: &ast::Expr) -> Option<i32> {
+    if let ast::Expr::NumberLiteral(num) = expr {
+        if let ast::Number::Int(int_val) = &num.value {
+            return int_val.as_i32();
+        }
+    }
+    None
+}
+
 /// Check if an expression is an attribute access on 'sys' with the given name.
 /// For example, `is_sys_attr(expr, "platform")` returns true for `sys.platform`.
 fn is_sys_attr(expr: &ast::Expr, name: &str) -> bool {
@@ -63,6 +84,56 @@ fn is_sys_attr(expr: &ast::Expr, name: &str) -> bool {
         }
     }
     false
+}
+
+/// Check if an expression contains a sys.version_info access pattern.
+/// Returns the type of access (whole, index, or slice) if found.
+fn contains_sys_version_info(expr: &ast::Expr) -> Option<SysVersionInfo> {
+    // Check for bare sys.version_info
+    if is_sys_attr(expr, "version_info") {
+        return Some(SysVersionInfo::Whole);
+    }
+
+    // Check for sys.version_info[...] subscript
+    if let ast::Expr::Subscript(subscript) = expr {
+        if !is_sys_attr(&subscript.value, "version_info") {
+            return None;
+        }
+
+        match &*subscript.slice {
+            // sys.version_info[index] - single integer index
+            ast::Expr::NumberLiteral(_) => {
+                let index = expr_to_int(&subscript.slice)?;
+                return Some(SysVersionInfo::Index(index));
+            }
+            // sys.version_info[begin:end] - slice
+            ast::Expr::Slice(slice) => {
+                // Check stride is None or 1
+                if let Some(stride) = &slice.step {
+                    if expr_to_int(stride)? != 1 {
+                        return None;
+                    }
+                }
+
+                // Extract begin and end values
+                let begin = if let Some(lower) = &slice.lower {
+                    Some(expr_to_int(lower)?)
+                } else {
+                    None
+                };
+                let end = if let Some(upper) = &slice.upper {
+                    Some(expr_to_int(upper)?)
+                } else {
+                    None
+                };
+
+                return Some(SysVersionInfo::Slice(begin, end));
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 /// Check if a name corresponds to a special constant with known truth value.
@@ -397,6 +468,84 @@ mod tests {
         // Not an attribute expression
         assert!(!is_sys_attr(&parse_expr("platform"), "platform"));
         assert!(!is_sys_attr(&parse_expr("sys"), "sys"));
+    }
+
+    #[test]
+    fn test_contains_sys_version_info() {
+        use ruff_python_parser::{Mode, ParseOptions, parse_unchecked};
+
+        let parse_expr = |code: &str| {
+            let parsed = parse_unchecked(code, ParseOptions::from(Mode::Expression));
+            let ast::Mod::Expression(expr_mod) = parsed.into_syntax() else {
+                panic!("Expected expression");
+            };
+            expr_mod.body
+        };
+
+        // Bare sys.version_info
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info")),
+            Some(SysVersionInfo::Whole)
+        );
+
+        // Single index access
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[0]")),
+            Some(SysVersionInfo::Index(0))
+        );
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[1]")),
+            Some(SysVersionInfo::Index(1))
+        );
+
+        // Slice with both bounds
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[0:2]")),
+            Some(SysVersionInfo::Slice(Some(0), Some(2)))
+        );
+
+        // Slice with only lower bound
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[1:]")),
+            Some(SysVersionInfo::Slice(Some(1), None))
+        );
+
+        // Slice with only upper bound
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[:2]")),
+            Some(SysVersionInfo::Slice(None, Some(2)))
+        );
+
+        // Slice with no bounds (equivalent to [:])
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[:]")),
+            Some(SysVersionInfo::Slice(None, None))
+        );
+
+        // Slice with stride 1 (allowed)
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[0:2:1]")),
+            Some(SysVersionInfo::Slice(Some(0), Some(2)))
+        );
+
+        // Slice with stride != 1 (not allowed)
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.version_info[0:2:2]")),
+            None
+        );
+
+        // Not sys.version_info
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("foo.version_info[0]")),
+            None
+        );
+        assert_eq!(
+            contains_sys_version_info(&parse_expr("sys.platform[0]")),
+            None
+        );
+
+        // Not a subscript or attribute
+        assert_eq!(contains_sys_version_info(&parse_expr("version_info")), None);
     }
 
     #[test]
