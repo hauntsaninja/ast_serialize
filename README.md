@@ -8,10 +8,16 @@ which uses the Python stdlib `ast` module for parsing.
 
 ## Development
 
+Prerequisites:
+
+- Recent Rust toolchain
+- Python 3.10+ (3.13t or 3.14t for free-threaded builds)
+- [maturin](https://github.com/PyO3/maturin): `pip install maturin`
+- Access to [mypy `new-parser` branch](https://github.com/python/mypy/tree/new-parser) for testing
+
 *You must use the `new-parser` branch in the mypy repository to use this with mypy.*
 
 Development build (fast compilation, unoptimized):
-
 ```bash
 maturin develop
 ```
@@ -21,14 +27,28 @@ Optimized development build:
 maturin develop --release
 ```
 
-Run Rust unit tests:
+## Testing
+
+**Rust unit tests:**
 ```bash
 cargo test
 ```
 
-Use `mypy/test/testcheck.py` in the `new-parser` branch to run mypy type checking tests 
-using ast_serialize. The test runner enables the new runner by default. Note that many
-tests are still failing.
+**Python integration tests:** 
+Run end-to-end parser and serialization/deserialization tests using mypy's test suite in 
+the new-parser branch:
+```bash
+cd ~/src/mypy  [or wherever you have mypy]
+pytest mypy -k NativeParser
+```
+
+Add new test cases to `test-data/unit/native-parser.test` (in the mypy repository).
+
+Note: Run `maturin develop` before testing if you've modified Rust code.
+
+Use `mypy/test/testcheck.py` in the `new-parser` branch to run mypy type checking 
+tests using ast_serialize. The test runner enables the new runner by default. Note 
+that many tests are still failing.
 
 ## Creating PRs
 
@@ -37,7 +57,7 @@ Contributions are welcome! Run mypy tests (see above) to get ideas about bugs an
 functionality. If your contributions needs changes in both mypy and ast_serialize, please
 mention this in the PR summary.
 
-## Building
+## Building Wheels
 
 ```bash
 # Build all wheels (stable ABI + free-threaded)
@@ -56,7 +76,8 @@ in PATH.
 
 ## Acknowledgments
 
-This is a wrapper around the Ruff parser. Credits to Ruff maintainers for developing a fast Python parser!
+This is a wrapper around the [Ruff](https://github.com/astral-sh/ruff) parser. Credits to Ruff 
+maintainers for developing a fast Python parser!
 
 ## License
 
