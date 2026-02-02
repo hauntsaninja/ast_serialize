@@ -1,28 +1,12 @@
 # ast_serialize - Python AST Serializer
 
-Python extension for parsing Python files and serializing their AST to mypy's binary format.
+This is a fast Python extension for parsing Python files and serializing the AST using 
+the native binary format used by mypy. This will eventually replace the current mypy parser,
+which uses the Python stdlib `ast` module for parsing.
 
-## Installation
-
-```bash
-pip install ast_serialize
-```
-
-## Usage
-
-```python
-import ast_serialize
-
-# Parse a Python file and get serialized AST bytes
-result = ast_serialize.parse("myfile.py")
-print(f"Serialized AST: {len(result)} bytes")
-```
+**This is work in progress.**
 
 ## Building
-
-See [BUILD.md](BUILD.md) for detailed build instructions.
-
-### Quick Build Commands
 
 ```bash
 # Build all wheels (stable ABI + free-threaded)
@@ -36,25 +20,29 @@ maturin build --release
 maturin build --release --no-default-features --features free-threaded --interpreter python3.13t
 ```
 
-Wheels are placed in: `/home/jukka/src/ruff/target/wheels/`
+If you see `Python 3.13t not found`, you'll need to install the free-threaded build of CPython 3.13
+in PATH.
 
-## Wheel Types
-
-| Wheel Type | Filename Pattern | Compatible With |
-|------------|------------------|-----------------|
-| Stable ABI | `cp39-abi3-*.whl` | Python 3.9, 3.10, 3.11, 3.12, 3.13+ (GIL) |
-| Free-threaded | `cp313t-cp313t-*.whl` | Python 3.13t (nogil) only |
 
 ## Development
 
-```bash
-# Development build (fast compilation, unoptimized)
-maturin develop
+*You must use the `new-parser` branch in the mypy repository to use this with mypy.*
 
-# Run tests
-python3 test_ast_serialize.py
+Development build (fast compilation, unoptimized):
+
+```bash
+maturin develop
 ```
+
+Optimized development build:
+```bash
+maturin develop --release
+```
+
+## Acknowledgments
+
+This is a wrapper around the Ruff parser. Credits to Ruff maintainers for developing a fast Python parser!
 
 ## License
 
-See repository license
+MIT
