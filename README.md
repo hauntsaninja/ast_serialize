@@ -75,6 +75,16 @@ maturin build --release --no-default-features --features free-threaded --interpr
 If you see `Python 3.13t not found`, you'll need to install the free-threaded build of CPython 3.13
 in PATH.
 
+## Using Coding Agents
+
+This project is designed to support coding agent assisted development (such as Claude Code, Codex
+or OpenCode). Notes:
+ * Ensure your coding agent has access to AGENTS.md (e.g. create a CLAUDE.md symbolic link).
+ * For the best experience, clone this repository as `~/src/ast_serialize`, and clone mypy
+   (with the new-parser branch checked out) as `~/src/mypy`.
+ * Have your mypy virtualenv active when starting the coding agent, or place the virtualenv
+   at `~/venv/mypy` (this is referred to in AGENTS.md).
+
 ## Acknowledgments
 
 This is a wrapper around the [Ruff](https://github.com/astral-sh/ruff) parser. Credits to Ruff 
