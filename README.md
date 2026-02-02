@@ -13,7 +13,7 @@ Prerequisites:
 - Recent Rust toolchain
 - Python 3.10+ (3.13t or 3.14t for free-threaded builds)
 - [maturin](https://github.com/PyO3/maturin): `pip install maturin`
-- Access to [mypy `new-parser` branch](https://github.com/python/mypy/tree/new-parser) for testing
+- Access to [mypy new-parser branch](https://github.com/python/mypy/tree/new-parser) for testing
 
 *You must use the `new-parser` branch in the mypy repository to use this with mypy.*
 
@@ -42,12 +42,13 @@ cd ~/src/mypy  [or wherever you have mypy]
 pytest mypy -k NativeParser
 ```
 
-Add new test cases to `test-data/unit/native-parser.test` (in the mypy repository).
+Add new test cases to `test-data/unit/native-parser.test` (in the mypy repository). See
+the main parser test cases in `parse.test` for the expected output format.
 
-Note: Run `maturin develop` before testing if you've modified Rust code.
+**Note:** Run `maturin develop` before testing if you've modified Rust code.
 
 Use `mypy/test/testcheck.py` in the `new-parser` branch to run mypy type checking 
-tests using ast_serialize. The test runner enables the new runner by default. Note 
+tests using ast_serialize. The test runner enables the new parser by default. Note
 that many tests are still failing.
 
 ## Creating PRs
