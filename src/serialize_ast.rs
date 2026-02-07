@@ -1471,8 +1471,13 @@ fn with_branch_flags(
 }
 
 fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
+    let has_else = stmt
+        .elif_else_clauses
+        .last()
+        .is_some_and(|clause| clause.test.is_none());
+
     // First analyze reachability of each block
-    let (main_flags, clause_flags) = {
+    let (main_flags, clause_flags, synthetic_else_flags) = {
         let mut analyzer = IfReachabilityAnalyzer::new(&ser.options);
         let main_flags = analyzer.condition_flags(&stmt.test);
         let mut clause_flags = Vec::with_capacity(stmt.elif_else_clauses.len());
@@ -1483,7 +1488,12 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
             };
             clause_flags.push(flags);
         }
-        (main_flags, clause_flags)
+        let synthetic_else_flags = if has_else {
+            None
+        } else {
+            Some(analyzer.else_flags())
+        };
+        (main_flags, clause_flags, synthetic_else_flags)
     };
 
     ser.write_tag(TAG_IF);
@@ -1498,10 +1508,6 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
         |ser| ser.serialize_block(&stmt.body),
     );
 
-    let has_else = stmt
-        .elif_else_clauses
-        .last()
-        .is_some_and(|clause| clause.test.is_none());
     let num_elif = stmt.elif_else_clauses.len() - if has_else { 1 } else { 0 };
     ser.write_tagged_int(num_elif as i64);
 
@@ -1528,7 +1534,17 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
     }
 
     if !has_else {
-        ser.write_bool(false);
+        let (else_unreachable, else_mypy_only) =
+            synthetic_else_flags.expect("synthetic else flags must exist when there is no else");
+        if else_unreachable {
+            // Serialize an empty block so that we can pass reachability information
+            ser.write_bool(true);
+            with_branch_flags(ser, else_unreachable, else_mypy_only, |ser| {
+                ser.serialize_empty_block(stmt.range())
+            });
+        } else {
+            ser.write_bool(false);
+        }
     }
     ser.write_location(stmt.range());
 }
