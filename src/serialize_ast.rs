@@ -1022,7 +1022,7 @@ impl Ser for ast::Stmt {
                         as_name: name.asname.as_ref().map(|n| n.to_string()),
                         range: name.range,
                         is_top_level: !ser.in_function,
-                        is_unreachable: false,
+                        is_unreachable: ser.current_unreachable,
                         is_mypy_only: false,
                     });
                 }
@@ -1084,7 +1084,7 @@ impl Ser for ast::Stmt {
                         names,
                         range: ifrom.range(),
                         is_top_level: !ser.in_function,
-                        is_unreachable: false,
+                        is_unreachable: ser.current_unreachable,
                         is_mypy_only: false,
                     });
 
