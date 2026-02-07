@@ -1454,7 +1454,24 @@ impl<'a> IfReachabilityAnalyzer<'a> {
     }
 }
 
+#[inline(always)]
+fn with_branch_flags(
+    ser: &mut Serializer,
+    branch_unreachable: bool,
+    branch_mypy_only: bool,
+    f: impl FnOnce(&mut Serializer),
+) {
+    let old_unreachable = ser.current_unreachable;
+    let old_mypy_only = ser.current_mypy_only;
+    ser.current_unreachable = ser.current_unreachable || branch_unreachable;
+    ser.current_mypy_only = ser.current_mypy_only || branch_mypy_only;
+    f(ser);
+    ser.current_unreachable = old_unreachable;
+    ser.current_mypy_only = old_mypy_only;
+}
+
 fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
+    // First analyze reachability of each block
     let (main_flags, clause_flags) = {
         let mut analyzer = IfReachabilityAnalyzer::new(&ser.options);
         let main_flags = analyzer.condition_flags(&stmt.test);
@@ -1474,13 +1491,12 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
 
     // Serialize main body with analyzer-provided flags.
     let (main_body_unreachable, main_body_mypy_only) = main_flags;
-    let old_unreachable = ser.current_unreachable;
-    let old_mypy_only = ser.current_mypy_only;
-    ser.current_unreachable = ser.current_unreachable || main_body_unreachable;
-    ser.current_mypy_only = ser.current_mypy_only || main_body_mypy_only;
-    ser.serialize_block(&stmt.body);
-    ser.current_unreachable = old_unreachable;
-    ser.current_mypy_only = old_mypy_only;
+    with_branch_flags(
+        ser,
+        main_body_unreachable,
+        main_body_mypy_only,
+        |ser| ser.serialize_block(&stmt.body),
+    );
 
     let has_else = stmt
         .elif_else_clauses
@@ -1497,28 +1513,16 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
             Some(expr) => {
                 // elif clause
                 expr.serialize(ser);
-
-                // Temporarily update state and serialize
-                let old_unreachable = ser.current_unreachable;
-                let old_mypy_only = ser.current_mypy_only;
-                ser.current_unreachable = ser.current_unreachable || branch_unreachable;
-                ser.current_mypy_only = ser.current_mypy_only || branch_mypy_only;
-                ser.serialize_block(&clause.body);
-                ser.current_unreachable = old_unreachable;
-                ser.current_mypy_only = old_mypy_only;
+                with_branch_flags(ser, branch_unreachable, branch_mypy_only, |ser| {
+                    ser.serialize_block(&clause.body)
+                });
             }
             None => {
                 // else clause
                 ser.write_bool(true);
-
-                // Temporarily update state and serialize
-                let old_unreachable = ser.current_unreachable;
-                let old_mypy_only = ser.current_mypy_only;
-                ser.current_unreachable = ser.current_unreachable || branch_unreachable;
-                ser.current_mypy_only = ser.current_mypy_only || branch_mypy_only;
-                ser.serialize_block(&clause.body);
-                ser.current_unreachable = old_unreachable;
-                ser.current_mypy_only = old_mypy_only;
+                with_branch_flags(ser, branch_unreachable, branch_mypy_only, |ser| {
+                    ser.serialize_block(&clause.body)
+                });
             }
         }
     }
