@@ -111,6 +111,8 @@ const TAG_STARRED_PATTERN: u8 = 222;
 const TAG_MAPPING_PATTERN: u8 = 223;
 const TAG_CLASS_PATTERN: u8 = 224;
 const TAG_TYPE_ALIAS_STMT: u8 = 225;
+const TAG_IMPORT_METADATA: u8 = 226;
+const TAG_IMPORTFROM_METADATA: u8 = 227;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -2339,6 +2341,115 @@ fn extract_int_literal_value(expr: &ast::Expr) -> Option<i64> {
         }
         _ => None,
     }
+}
+
+/// Serialize a list of import statements to bytes.
+///
+/// # Arguments
+///
+/// * `imports` - List of import statements to serialize
+/// * `text` - Source text (used for creating LineIndex to serialize ranges)
+/// * `line_index` - Optional pre-computed LineIndex (if None, will be computed from text)
+/// * `is_all_ascii` - Optional pre-computed ASCII flag (if None, will be computed from text)
+/// * `lines_with_non_ascii` - Optional pre-computed per-line non-ASCII flags (if None, will be computed from text)
+///
+/// # Returns
+///
+/// Serialized bytes representing the imports
+pub fn serialize_imports(
+    imports: &[ImportStatement],
+    text: &str,
+    line_index: Option<LineIndex>,
+    is_all_ascii: Option<bool>,
+    lines_with_non_ascii: Option<Vec<bool>>,
+) -> Vec<u8> {
+    let line_index = line_index.unwrap_or_else(|| LineIndex::from_source_text(text));
+    let is_all_ascii = is_all_ascii.unwrap_or_else(|| text.is_ascii());
+    let lines_with_non_ascii = lines_with_non_ascii.unwrap_or_else(|| {
+        if is_all_ascii {
+            Vec::new()
+        } else {
+            text.lines().map(|line| !line.is_ascii()).collect()
+        }
+    });
+
+    let mut ser = Serializer {
+        bytes: Vec::new(),
+        imports: Vec::new(),
+        line_index,
+        text,
+        skip_function_bodies: false,
+        in_class: false,
+        in_function: false,
+        is_all_ascii,
+        lines_with_non_ascii,
+        type_comments: HashMap::new(),
+    };
+
+    // Write list of imports
+    ser.write_tag(TAG_LIST_GEN);
+    ser.write_usize(imports.len());
+
+    for import in imports {
+        match import {
+            ImportStatement::Import {
+                name,
+                relative,
+                as_name,
+                range,
+                is_top_level,
+                is_unreachable,
+                is_mypy_only,
+            } => {
+                ser.write_tag(TAG_IMPORT_METADATA);
+                ser.write_bytes(name.as_bytes());
+                ser.write_tagged_int(*relative as i64);
+                if let Some(asname) = as_name {
+                    ser.write_bool(true);
+                    ser.write_bytes(asname.as_bytes());
+                } else {
+                    ser.write_bool(false);
+                }
+                ser.write_location(*range);
+                ser.write_bool(*is_top_level);
+                ser.write_bool(*is_unreachable);
+                ser.write_bool(*is_mypy_only);
+            }
+            ImportStatement::ImportFrom {
+                module,
+                relative,
+                names,
+                range,
+                is_top_level,
+                is_unreachable,
+                is_mypy_only,
+            } => {
+                ser.write_tag(TAG_IMPORTFROM_METADATA);
+                ser.write_bytes(module.as_bytes());
+                ser.write_tagged_int(*relative as i64);
+
+                // Write list of (name, as_name) tuples
+                ser.write_tag(TAG_LIST_GEN);
+                ser.write_usize(names.len());
+                for (name, as_name) in names {
+                    ser.write_bytes(name.as_bytes());
+                    if let Some(asname) = as_name {
+                        ser.write_bool(true);
+                        ser.write_bytes(asname.as_bytes());
+                    } else {
+                        ser.write_bool(false);
+                    }
+                }
+
+                ser.write_location(*range);
+                ser.write_bool(*is_top_level);
+                ser.write_bool(*is_unreachable);
+                ser.write_bool(*is_mypy_only);
+            }
+        }
+    }
+
+    ser.bytes
 }
 
 #[cfg(test)]
