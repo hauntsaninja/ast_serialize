@@ -151,6 +151,10 @@ const LONG_INT_TRAILER: u8 = 15;
 /// * `file_path` - Path to the Python file to parse and serialize
 /// * `skip_function_bodies` - If true, omit function bodies unless they have externally visible effects
 ///   (for methods in classes only; module-level functions always have bodies omitted when this is true)
+/// * `python_version` - Python version as (major, minor) tuple for reachability analysis
+/// * `platform` - Platform string for reachability analysis
+/// * `always_true` - Names that are always considered true for reachability analysis
+/// * `always_false` - Names that are always considered false for reachability analysis
 ///
 /// # Returns
 ///
@@ -165,6 +169,10 @@ const LONG_INT_TRAILER: u8 = 15;
 pub(crate) fn serialize_python_file(
     file_path: &Path,
     skip_function_bodies: bool,
+    python_version: (u32, u32),
+    platform: String,
+    always_true: Vec<String>,
+    always_false: Vec<String>,
 ) -> Result<(Vec<u8>, Vec<SyntaxError>, Vec<(usize, Vec<String>)>, Vec<u8>)> {
     let source_type = PySourceType::from(file_path);
     let source_text = std::fs::read_to_string(file_path)?;
@@ -212,6 +220,11 @@ pub(crate) fn serialize_python_file(
         is_all_ascii,
         lines_with_non_ascii,
         type_comments,
+        python_version,
+        platform,
+        always_true,
+        always_false,
+        current_unreachable: false,
     };
     parsed.syntax().serialize(&mut ser);
 
@@ -260,6 +273,11 @@ struct Serializer<'a> {
     is_all_ascii: bool,         // Whether the entire file contains only ASCII characters
     lines_with_non_ascii: Vec<bool>, // Per-line flags: true if line has non-ASCII (empty if is_all_ascii)
     type_comments: HashMap<usize, ast::Expr>, // Type comments by line number (1-indexed)
+    python_version: (u32, u32), // Python version for reachability analysis
+    platform: String,           // Platform for reachability analysis
+    always_true: Vec<String>,   // Names always considered true
+    always_false: Vec<String>,  // Names always considered false
+    current_unreachable: bool,  // Whether we're currently in an unreachable block
 }
 
 impl<'a> Serializer<'a> {
@@ -414,6 +432,7 @@ impl<'a> Serializer<'a> {
         self.write_tag(TAG_BLOCK);
         self.write_tag(TAG_LIST_GEN);
         self.write_usize(block.len());
+        self.write_bool(self.current_unreachable);
         for stmt in block {
             stmt.serialize(self);
         }
@@ -424,6 +443,7 @@ impl<'a> Serializer<'a> {
         self.write_tag(TAG_BLOCK);
         self.write_tag(TAG_LIST_GEN);
         self.write_int(0); // Empty list of statements
+        self.write_bool(self.current_unreachable);
         self.write_location(range); // Write location after zero-length list
         self.write_end_tag();
     }
@@ -1095,22 +1115,89 @@ impl Ser for ast::Stmt {
             ast::Stmt::If(s) => {
                 ser.write_tag(TAG_IF);
                 s.test.serialize(ser);
+
+                // Analyze main if condition for reachability
+                let main_truth = crate::reachability::infer_condition_value(
+                    &s.test,
+                    ser.python_version,
+                    &ser.platform,
+                    &ser.always_true,
+                    &ser.always_false,
+                );
+
+                // Main body unreachable if condition is always/mypy false
+                let main_body_unreachable = matches!(
+                    main_truth,
+                    crate::reachability::TruthValue::AlwaysFalse
+                        | crate::reachability::TruthValue::MypyFalse
+                );
+
+                // Serialize main body with potentially updated unreachable state
+                let old_unreachable = ser.current_unreachable;
+                ser.current_unreachable = ser.current_unreachable || main_body_unreachable;
                 ser.serialize_block(&s.body);
+                ser.current_unreachable = old_unreachable;
+
+                // Track if we've seen an always-true condition (makes rest unreachable)
+                let mut remaining_unreachable = matches!(
+                    main_truth,
+                    crate::reachability::TruthValue::AlwaysTrue
+                        | crate::reachability::TruthValue::MypyTrue
+                );
+
                 let has_else = s.elif_else_clauses.last().is_some_and(|v| v.test.is_none());
                 let num_elif = s.elif_else_clauses.len() - if has_else { 1 } else { 0 };
                 ser.write_tagged_int(num_elif as i64);
+
+                // Process elif/else clauses
                 for ee in &s.elif_else_clauses {
                     match &ee.test {
                         Some(e) => {
+                            // elif clause
                             e.serialize(ser);
+                            let elif_truth = crate::reachability::infer_condition_value(
+                                e,
+                                ser.python_version,
+                                &ser.platform,
+                                &ser.always_true,
+                                &ser.always_false,
+                            );
+
+                            // Unreachable if: prior condition was true OR this condition is false
+                            let elif_unreachable = remaining_unreachable
+                                || matches!(
+                                    elif_truth,
+                                    crate::reachability::TruthValue::AlwaysFalse
+                                        | crate::reachability::TruthValue::MypyFalse
+                                );
+
+                            // Temporarily update state and serialize
+                            let old_unreachable = ser.current_unreachable;
+                            ser.current_unreachable = ser.current_unreachable || elif_unreachable;
                             ser.serialize_block(&ee.body);
+                            ser.current_unreachable = old_unreachable;
+
+                            // Update tracker if this elif is always true
+                            remaining_unreachable = remaining_unreachable
+                                || matches!(
+                                    elif_truth,
+                                    crate::reachability::TruthValue::AlwaysTrue
+                                        | crate::reachability::TruthValue::MypyTrue
+                                );
                         }
                         None => {
+                            // else clause
                             ser.write_bool(true);
+
+                            // Temporarily update state and serialize
+                            let old_unreachable = ser.current_unreachable;
+                            ser.current_unreachable = ser.current_unreachable || remaining_unreachable;
                             ser.serialize_block(&ee.body);
+                            ser.current_unreachable = old_unreachable;
                         }
                     }
                 }
+
                 if !has_else {
                     ser.write_bool(false);
                 }
@@ -1733,6 +1820,7 @@ impl Ser for ast::Expr {
                 ser.write_tag(TAG_BLOCK);
                 ser.write_tag(TAG_LIST_GEN);
                 ser.write_int(1); // One statement (the return)
+                ser.write_bool(ser.current_unreachable); // Write unreachable flag
 
                 ser.write_tag(TAG_RETURN);
                 // Return statement has an optional value, we always have a value for lambda
@@ -2393,6 +2481,11 @@ pub fn serialize_imports(
         is_all_ascii,
         lines_with_non_ascii,
         type_comments: HashMap::new(),
+        python_version: (3, 12), // Default version for serializing imports
+        platform: String::from("linux"), // Default platform
+        always_true: Vec::new(),
+        always_false: Vec::new(),
+        current_unreachable: false,
     };
 
     // Write list of imports
@@ -2488,6 +2581,11 @@ mod tests {
             is_all_ascii,
             lines_with_non_ascii,
             type_comments: HashMap::new(),
+            python_version: (3, 12), // Test default
+            platform: String::from("linux"), // Test default
+            always_true: Vec::new(),
+            always_false: Vec::new(),
+            current_unreachable: false,
         }
     }
 

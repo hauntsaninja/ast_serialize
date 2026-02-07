@@ -13,6 +13,10 @@ pub mod type_comment;
 ///
 /// * `fnam` - Path to the Python file to parse
 /// * `skip_function_bodies` - Optional boolean to skip function bodies without externally visible effects (default: false)
+/// * `python_version` - Optional tuple (major, minor) for reachability analysis (default: use sys.version_info)
+/// * `platform` - Optional platform string for reachability analysis (default: use sys.platform)
+/// * `always_true` - Optional list of names that are always considered true (default: empty)
+/// * `always_false` - Optional list of names that are always considered false (default: empty)
 ///
 /// # Returns
 ///
@@ -26,16 +30,51 @@ pub mod type_comment;
 ///
 /// Raises ValueError if the file cannot be read (but not for syntax errors)
 #[pyfunction]
-#[pyo3(signature = (fnam, skip_function_bodies=false))]
+#[pyo3(signature = (
+    fnam,
+    skip_function_bodies=false,
+    python_version=None,
+    platform=None,
+    always_true=None,
+    always_false=None
+))]
 fn parse(
     py: Python,
     fnam: String,
     skip_function_bodies: bool,
+    python_version: Option<(u32, u32)>,
+    platform: Option<String>,
+    always_true: Option<Vec<String>>,
+    always_false: Option<Vec<String>>,
 ) -> PyResult<(Vec<u8>, Vec<PyObject>, Vec<PyObject>, Vec<u8>)> {
+    // Get defaults from Python if not provided
+    let python_version = python_version.unwrap_or_else(|| {
+        let sys = py.import("sys").unwrap();
+        let version_info = sys.getattr("version_info").unwrap();
+        let major: u32 = version_info.get_item(0).unwrap().extract().unwrap();
+        let minor: u32 = version_info.get_item(1).unwrap().extract().unwrap();
+        (major, minor)
+    });
+
+    let platform = platform.unwrap_or_else(|| {
+        let sys = py.import("sys").unwrap();
+        sys.getattr("platform").unwrap().extract().unwrap()
+    });
+
+    let always_true = always_true.unwrap_or_default();
+    let always_false = always_false.unwrap_or_default();
+
     let path = Path::new(&fnam);
     let (ast_bytes, syntax_errors, type_ignore_lines, import_bytes) =
-        serialize_ast::serialize_python_file(path, skip_function_bodies)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        serialize_ast::serialize_python_file(
+            path,
+            skip_function_bodies,
+            python_version,
+            platform,
+            always_true,
+            always_false,
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     // Convert syntax errors to Python dicts
     let py_errors: Vec<PyObject> = syntax_errors
