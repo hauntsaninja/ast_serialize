@@ -32,9 +32,9 @@ fn parse(
     skip_function_bodies: bool,
 ) -> PyResult<(Vec<u8>, Vec<PyObject>, Vec<PyObject>)> {
     let path = Path::new(&fnam);
-    let (ast_bytes, syntax_errors, type_ignore_lines) =
-        serialize_ast::serialize_python_file(path, skip_function_bodies)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+    let (ast_bytes, syntax_errors, type_ignore_lines) = py
+        .allow_threads(|| serialize_ast::serialize_python_file(path, skip_function_bodies))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     // Convert syntax errors to Python dicts
     let py_errors: Vec<PyObject> = syntax_errors
