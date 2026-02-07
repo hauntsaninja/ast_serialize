@@ -2681,4 +2681,55 @@ mod tests {
 
         assert_eq!(ser.bytes, expected);
     }
+
+    #[test]
+    fn test_serialize_single_import() {
+        // Create a simple import: "import os" at line 1, columns 0-9
+        let text = "import os\n";
+        let imports = vec![ImportStatement::Import {
+            name: "os".to_string(),
+            relative: 0,
+            as_name: None,
+            range: TextRange::new(0.into(), 9.into()),
+            is_top_level: true,
+            is_unreachable: false,
+            is_mypy_only: false,
+        }];
+
+        let bytes = serialize_imports(&imports, text, None, None, None);
+
+        // Expected byte sequence:
+        // TAG_LIST_GEN (20) + length (1)
+        // TAG_IMPORT_METADATA (226)
+        // name: TAG_LITERAL_STR (4) + length (2) + "os"
+        // relative: TAG_LITERAL_INT (3) + int_val(0)
+        // as_name: TAG_LITERAL_FALSE (0)
+        // range: TAG_LOCATION (152) + line (1) + col (0) + line_diff (0) + col_diff (9)
+        // Note: write_location writes start line, start col, line difference, col difference
+        // is_top_level: TAG_LITERAL_TRUE (1)
+        // is_unreachable: TAG_LITERAL_FALSE (0)
+        // is_mypy_only: TAG_LITERAL_FALSE (0)
+        let expected = vec![
+            TAG_LIST_GEN,
+            int_val(1), // list length = 1
+            TAG_IMPORT_METADATA,
+            TAG_LITERAL_STR,
+            int_val(2), // "os" length
+            b'o',
+            b's',
+            TAG_LITERAL_INT,
+            int_val(0), // relative = 0
+            TAG_LITERAL_FALSE, // no as_name
+            TAG_LOCATION,
+            int_val(1), // start line 1
+            int_val(0), // start column 0 (0-based)
+            int_val(0), // line difference (same line)
+            int_val(9), // column difference (9 chars)
+            TAG_LITERAL_TRUE, // is_top_level = true
+            TAG_LITERAL_FALSE, // is_unreachable = false
+            TAG_LITERAL_FALSE, // is_mypy_only = false
+        ];
+
+        assert_eq!(bytes, expected);
+    }
 }
