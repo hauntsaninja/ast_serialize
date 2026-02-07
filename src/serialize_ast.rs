@@ -1433,7 +1433,7 @@ impl<'a> IfReachabilityAnalyzer<'a> {
     ///
     /// Returns `(unreachable, mypy_only)` for the corresponding block.
     fn condition_flags(&mut self, expr: &ast::Expr) -> (bool, bool) {
-        let truth = crate::reachability::infer_condition_value(expr, self.options);
+        let truth = crate::reachability::infer_condition_value(expr, &self.options);
 
         let unreachable = self.tail_unreachable || is_always_or_mypy_false(truth);
         let mypy_only =
@@ -1455,20 +1455,25 @@ impl<'a> IfReachabilityAnalyzer<'a> {
 }
 
 fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
+    let (main_flags, clause_flags) = {
+        let mut analyzer = IfReachabilityAnalyzer::new(&ser.options);
+        let main_flags = analyzer.condition_flags(&stmt.test);
+        let mut clause_flags = Vec::with_capacity(stmt.elif_else_clauses.len());
+        for clause in &stmt.elif_else_clauses {
+            let flags = match &clause.test {
+                Some(expr) => analyzer.condition_flags(expr),
+                None => analyzer.else_flags(),
+            };
+            clause_flags.push(flags);
+        }
+        (main_flags, clause_flags)
+    };
+
     ser.write_tag(TAG_IF);
     stmt.test.serialize(ser);
 
-    // Analyze main if condition for reachability
-    let main_truth = crate::reachability::infer_condition_value(&stmt.test, &ser.options);
-
-    // Main body unreachable if condition is always/mypy false
-    // We only care about mypy reachability, so MypyFalse makes body unreachable
-    let main_body_unreachable = is_always_or_mypy_false(main_truth);
-
-    // Main body is mypy_only if condition is mypy true
-    let main_body_mypy_only = main_truth == TruthValue::MypyTrue;
-
-    // Serialize main body with potentially updated state
+    // Serialize main body with analyzer-provided flags.
+    let (main_body_unreachable, main_body_mypy_only) = main_flags;
     let old_unreachable = ser.current_unreachable;
     let old_mypy_only = ser.current_mypy_only;
     ser.current_unreachable = ser.current_unreachable || main_body_unreachable;
@@ -1476,15 +1481,6 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
     ser.serialize_block(&stmt.body);
     ser.current_unreachable = old_unreachable;
     ser.current_mypy_only = old_mypy_only;
-
-    // Track if we've seen an always/mypy-true condition (makes rest unreachable in mypy)
-    let mut remaining_unreachable = is_always_or_mypy_true(main_truth);
-
-    // Track if we've seen a mypy-true condition (makes rest not mypy-only, they're runtime-only)
-    let mut had_mypy_true = main_truth == TruthValue::MypyTrue;
-
-    // Track if we've seen a mypy-false condition (makes else mypy-only)
-    let had_mypy_false = main_truth == TruthValue::MypyFalse;
 
     let has_else = stmt
         .elif_else_clauses
@@ -1494,36 +1490,22 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
     ser.write_tagged_int(num_elif as i64);
 
     // Process elif/else clauses
-    for clause in &stmt.elif_else_clauses {
+    for (clause, (branch_unreachable, branch_mypy_only)) in
+        stmt.elif_else_clauses.iter().zip(clause_flags.iter().copied())
+    {
         match &clause.test {
             Some(expr) => {
                 // elif clause
                 expr.serialize(ser);
-                let elif_truth = crate::reachability::infer_condition_value(expr, &ser.options);
-
-                // Unreachable if: prior condition was always true OR this condition is always/mypy false
-                let elif_unreachable = remaining_unreachable || is_always_or_mypy_false(elif_truth);
-
-                // Mypy-only if: NOT after a mypy-true condition AND this condition is mypy-true
-                let elif_mypy_only = !had_mypy_true && elif_truth == TruthValue::MypyTrue;
 
                 // Temporarily update state and serialize
                 let old_unreachable = ser.current_unreachable;
                 let old_mypy_only = ser.current_mypy_only;
-                ser.current_unreachable = ser.current_unreachable || elif_unreachable;
-                // If we had a prior mypy-true, this branch is runtime-only (not mypy-only)
-                ser.current_mypy_only = if had_mypy_true {
-                    false
-                } else {
-                    ser.current_mypy_only || elif_mypy_only
-                };
+                ser.current_unreachable = ser.current_unreachable || branch_unreachable;
+                ser.current_mypy_only = ser.current_mypy_only || branch_mypy_only;
                 ser.serialize_block(&clause.body);
                 ser.current_unreachable = old_unreachable;
                 ser.current_mypy_only = old_mypy_only;
-
-                // Update trackers
-                remaining_unreachable = remaining_unreachable || is_always_or_mypy_true(elif_truth);
-                had_mypy_true = had_mypy_true || elif_truth == TruthValue::MypyTrue;
             }
             None => {
                 // else clause
@@ -1532,18 +1514,8 @@ fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
                 // Temporarily update state and serialize
                 let old_unreachable = ser.current_unreachable;
                 let old_mypy_only = ser.current_mypy_only;
-                ser.current_unreachable = ser.current_unreachable || remaining_unreachable;
-                // Else mypy_only state depends on the main condition:
-                // - If MypyTrue: else is runtime-only (not mypy-only)
-                // - If MypyFalse: else is mypy-only
-                // - Otherwise: preserve current
-                ser.current_mypy_only = if had_mypy_true {
-                    false
-                } else if had_mypy_false {
-                    true
-                } else {
-                    ser.current_mypy_only
-                };
+                ser.current_unreachable = ser.current_unreachable || branch_unreachable;
+                ser.current_mypy_only = ser.current_mypy_only || branch_mypy_only;
                 ser.serialize_block(&clause.body);
                 ser.current_unreachable = old_unreachable;
                 ser.current_mypy_only = old_mypy_only;
