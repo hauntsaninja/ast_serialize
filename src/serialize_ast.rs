@@ -1404,6 +1404,56 @@ fn is_always_or_mypy_true(truth: TruthValue) -> bool {
     matches!(truth, TruthValue::AlwaysTrue | TruthValue::MypyTrue)
 }
 
+/// Stateful reachability analyzer for if/elif/else chains.
+///
+/// This is intentionally kept separate from serialization so emit logic can
+/// eventually call it in sequence:
+/// - `condition_flags(expr)` for each if/elif condition
+/// - `else_flags()` for the optional else block
+#[allow(dead_code)]
+struct IfReachabilityAnalyzer<'a> {
+    options: &'a Options,
+    tail_unreachable: bool,
+    seen_mypy_true: bool,
+    seen_mypy_false: bool,
+}
+
+#[allow(dead_code)]
+impl<'a> IfReachabilityAnalyzer<'a> {
+    fn new(options: &'a Options) -> Self {
+        Self {
+            options,
+            tail_unreachable: false,
+            seen_mypy_true: false,
+            seen_mypy_false: false,
+        }
+    }
+
+    /// Analyze one if/elif condition and advance analyzer state.
+    ///
+    /// Returns `(unreachable, mypy_only)` for the corresponding block.
+    fn condition_flags(&mut self, expr: &ast::Expr) -> (bool, bool) {
+        let truth = crate::reachability::infer_condition_value(expr, self.options);
+
+        let unreachable = self.tail_unreachable || is_always_or_mypy_false(truth);
+        let mypy_only =
+            !unreachable && !self.seen_mypy_true && truth == TruthValue::MypyTrue;
+
+        self.tail_unreachable = self.tail_unreachable || is_always_or_mypy_true(truth);
+        self.seen_mypy_true = self.seen_mypy_true || truth == TruthValue::MypyTrue;
+        self.seen_mypy_false = self.seen_mypy_false || truth == TruthValue::MypyFalse;
+
+        (unreachable, mypy_only)
+    }
+
+    /// Returns `(unreachable, mypy_only)` for the else block.
+    fn else_flags(&self) -> (bool, bool) {
+        let unreachable = self.tail_unreachable;
+        let mypy_only = !unreachable && self.seen_mypy_false && !self.seen_mypy_true;
+        (unreachable, mypy_only)
+    }
+}
+
 fn serialize_if_stmt(ser: &mut Serializer, stmt: &ast::StmtIf) {
     ser.write_tag(TAG_IF);
     stmt.test.serialize(ser);
@@ -2574,6 +2624,32 @@ mod tests {
         return ((x - MIN_SHORT_INT) << 1) as u8;
     }
 
+    fn parse_expr_for_test(expr: &str) -> ast::Expr {
+        let parsed = parse_unchecked(expr, ParseOptions::from(Mode::Expression));
+        assert!(
+            parsed.errors().is_empty(),
+            "failed to parse test expression: {expr}"
+        );
+        let ast::Mod::Expression(expr_mod) = parsed.into_syntax() else {
+            panic!("expected expression AST for test input: {expr}");
+        };
+        *expr_mod.body
+    }
+
+    fn analyze_if_chain(condition_exprs: &[&str]) -> (Vec<(bool, bool)>, (bool, bool)) {
+        let options = Options::default();
+        let mut analyzer = IfReachabilityAnalyzer::new(&options);
+        let mut condition_flags = Vec::with_capacity(condition_exprs.len());
+
+        for expr in condition_exprs {
+            let parsed = parse_expr_for_test(expr);
+            condition_flags.push(analyzer.condition_flags(&parsed));
+        }
+
+        let else_flags = analyzer.else_flags();
+        (condition_flags, else_flags)
+    }
+
     fn make_ser<'a>(text: &'a str) -> Serializer<'a> {
         let index = LineIndex::from_source_text(text);
         let is_all_ascii = text.is_ascii();
@@ -2596,6 +2672,58 @@ mod tests {
             options: Options::default(),
             current_unreachable: false,
             current_mypy_only: false,
+        }
+    }
+
+    #[test]
+    fn test_if_reachability_analyzer_flags() {
+        struct Case {
+            name: &'static str,
+            conditions: &'static [&'static str],
+            expected_condition_flags: &'static [(bool, bool)],
+            expected_else_flags: (bool, bool),
+        }
+
+        let cases = [
+            Case {
+                name: "all_unknown",
+                conditions: &["x", "y"],
+                expected_condition_flags: &[(false, false), (false, false)],
+                expected_else_flags: (false, false),
+            },
+            Case {
+                name: "always_true_makes_tail_unreachable",
+                conditions: &["x", "PY3", "z"],
+                expected_condition_flags: &[(false, false), (false, false), (true, false)],
+                expected_else_flags: (true, false),
+            },
+            Case {
+                name: "mypy_true_is_mypy_only_then_closes_tail",
+                conditions: &["MYPY", "z"],
+                expected_condition_flags: &[(false, true), (true, false)],
+                expected_else_flags: (true, false),
+            },
+            Case {
+                name: "mypy_false_makes_else_mypy_only",
+                conditions: &["x", "not MYPY"],
+                expected_condition_flags: &[(false, false), (true, false)],
+                expected_else_flags: (false, true),
+            },
+        ];
+
+        for case in cases {
+            let (condition_flags, else_flags) = analyze_if_chain(case.conditions);
+            assert_eq!(
+                condition_flags.as_slice(),
+                case.expected_condition_flags,
+                "condition flags mismatch for {}",
+                case.name
+            );
+            assert_eq!(
+                else_flags, case.expected_else_flags,
+                "else flags mismatch for {}",
+                case.name
+            );
         }
     }
 
