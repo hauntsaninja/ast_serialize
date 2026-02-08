@@ -234,6 +234,11 @@ pub(crate) fn serialize_python_file(
     Ok((ser.bytes, syntax_errors, type_ignore_lines, import_bytes))
 }
 
+// Bit flags for import statement metadata
+const IMPORT_FLAG_TOP_LEVEL: u8 = 1 << 0;    // true if import is not within a function
+const IMPORT_FLAG_UNREACHABLE: u8 = 1 << 1;  // true if import is in unreachable code
+const IMPORT_FLAG_MYPY_ONLY: u8 = 1 << 2;    // true if import is mypy-only (e.g., in TYPE_CHECKING block)
+
 // Used to report which imports are used in a file
 enum ImportStatement {
     Import {
@@ -241,18 +246,14 @@ enum ImportStatement {
         relative: i32,           // Number of dots in relative import 'import ..x'
         as_name: Option<String>, // Set for 'import x as y'
         range: TextRange,        // Source range of the import alias
-        is_top_level: bool,      // true if import is not within a function
-        is_unreachable: bool,    // true if import is in unreachable code
-        is_mypy_only: bool,      // true if import is mypy-only (e.g., in TYPE_CHECKING block)
+        flags: u8,               // Bitfield of IMPORT_FLAG_* constants
     },
     ImportFrom {
         module: String, // Module being imported from (empty string for "from . import x")
         relative: i32,  // Number of dots in relative import
         names: Vec<(String, Option<String>)>, // List of (name, as_name) tuples
         range: TextRange, // Source range of the entire import statement
-        is_top_level: bool, // true if import is not within a function
-        is_unreachable: bool, // true if import is in unreachable code
-        is_mypy_only: bool, // true if import is mypy-only (e.g., in TYPE_CHECKING block)
+        flags: u8,       // Bitfield of IMPORT_FLAG_* constants
     },
 }
 
@@ -1014,9 +1015,7 @@ impl Ser for ast::Stmt {
                         relative: 0, // Not a relative import
                         as_name: name.asname.as_ref().map(|n| n.to_string()),
                         range: name.range,
-                        is_top_level: !ser.in_function,
-                        is_unreachable: ser.current_unreachable,
-                        is_mypy_only: ser.current_mypy_only,
+                        flags: make_import_flags(ser),
                     });
                 }
                 ser.write_location(i.range());
@@ -1076,9 +1075,7 @@ impl Ser for ast::Stmt {
                         relative: ifrom.level as i32,
                         names,
                         range: ifrom.range(),
-                        is_top_level: !ser.in_function,
-                        is_unreachable: ser.current_unreachable,
-                        is_mypy_only: ser.current_mypy_only,
+                        flags: make_import_flags(ser),
                     });
 
                     ser.write_location(ifrom.range());
@@ -2496,6 +2493,13 @@ fn extract_int_literal_value(expr: &ast::Expr) -> Option<i64> {
     }
 }
 
+/// Build import flags from current serializer state
+fn make_import_flags(ser: &Serializer) -> u8 {
+    (if !ser.in_function { IMPORT_FLAG_TOP_LEVEL } else { 0 })
+        | (if ser.current_unreachable { IMPORT_FLAG_UNREACHABLE } else { 0 })
+        | (if ser.current_mypy_only { IMPORT_FLAG_MYPY_ONLY } else { 0 })
+}
+
 /// Serialize a list of import statements to bytes.
 ///
 /// # Arguments
@@ -2553,9 +2557,7 @@ pub fn serialize_imports(
                 relative,
                 as_name,
                 range,
-                is_top_level,
-                is_unreachable,
-                is_mypy_only,
+                flags,
             } => {
                 ser.write_tag(TAG_IMPORT_METADATA);
                 ser.write_bytes(name.as_bytes());
@@ -2567,18 +2569,14 @@ pub fn serialize_imports(
                     ser.write_bool(false);
                 }
                 ser.write_location(*range);
-                ser.write_bool(*is_top_level);
-                ser.write_bool(*is_unreachable);
-                ser.write_bool(*is_mypy_only);
+                ser.write_tagged_int(*flags as i64);
             }
             ImportStatement::ImportFrom {
                 module,
                 relative,
                 names,
                 range,
-                is_top_level,
-                is_unreachable,
-                is_mypy_only,
+                flags,
             } => {
                 ser.write_tag(TAG_IMPORTFROM_METADATA);
                 ser.write_bytes(module.as_bytes());
@@ -2598,9 +2596,7 @@ pub fn serialize_imports(
                 }
 
                 ser.write_location(*range);
-                ser.write_bool(*is_top_level);
-                ser.write_bool(*is_unreachable);
-                ser.write_bool(*is_mypy_only);
+                ser.write_tagged_int(*flags as i64);
             }
         }
     }
@@ -2928,9 +2924,7 @@ mod tests {
             relative: 0,
             as_name: None,
             range: TextRange::new(0.into(), 9.into()),
-            is_top_level: true,
-            is_unreachable: false,
-            is_mypy_only: false,
+            flags: IMPORT_FLAG_TOP_LEVEL,
         }];
 
         let bytes = serialize_imports(&imports, text, None, None, None);
@@ -2943,9 +2937,7 @@ mod tests {
         // as_name: TAG_LITERAL_FALSE (0)
         // range: TAG_LOCATION (152) + line (1) + col (0) + line_diff (0) + col_diff (9)
         // Note: write_location writes start line, start col, line difference, col difference
-        // is_top_level: TAG_LITERAL_TRUE (1)
-        // is_unreachable: TAG_LITERAL_FALSE (0)
-        // is_mypy_only: TAG_LITERAL_FALSE (0)
+        // flags: TAG_LITERAL_INT (3) + int_val(1) - IMPORT_FLAG_TOP_LEVEL set
         let expected = vec![
             TAG_LIST_GEN,
             int_val(1), // list length = 1
@@ -2962,9 +2954,8 @@ mod tests {
             int_val(0), // start column 0 (0-based)
             int_val(0), // line difference (same line)
             int_val(9), // column difference (9 chars)
-            TAG_LITERAL_TRUE, // is_top_level = true
-            TAG_LITERAL_FALSE, // is_unreachable = false
-            TAG_LITERAL_FALSE, // is_mypy_only = false
+            TAG_LITERAL_INT, // flags tag
+            int_val(1), // flags: IMPORT_FLAG_TOP_LEVEL (bit 0 set)
         ];
 
         assert_eq!(bytes, expected);
