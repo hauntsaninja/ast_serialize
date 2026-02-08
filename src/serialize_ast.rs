@@ -115,6 +115,7 @@ const TAG_CLASS_PATTERN: u8 = 224;
 const TAG_TYPE_ALIAS_STMT: u8 = 225;
 const TAG_IMPORT_METADATA: u8 = 226;
 const TAG_IMPORTFROM_METADATA: u8 = 227;
+const TAG_IMPORTALL_METADATA: u8 = 228;
 const TAG_UNBOUND_TYPE: u8 = 104;
 const TAG_UNION_TYPE: u8 = 115;
 const TAG_LIST_TYPE: u8 = 118;
@@ -254,6 +255,12 @@ enum ImportStatement {
         names: Vec<(String, Option<String>)>, // List of (name, as_name) tuples
         range: TextRange, // Source range of the entire import statement
         flags: u8,       // Bitfield of IMPORT_FLAG_* constants
+    },
+    ImportAll {
+        module: String,   // Module being imported from (empty string for "from . import *")
+        relative: i32,    // Number of dots in relative import
+        range: TextRange, // Source range of the entire import statement
+        flags: u8,        // Bitfield of IMPORT_FLAG_* constants
     },
 }
 
@@ -1033,6 +1040,17 @@ impl Ser for ast::Stmt {
                     ser.write_tagged_int(ifrom.level as i64);
 
                     ser.write_location(ifrom.range());
+
+                    // Track in imports list for dependency tracking
+                    ser.imports.push(ImportStatement::ImportAll {
+                        module: ifrom
+                            .module
+                            .as_ref()
+                            .map_or(String::new(), |m| m.to_string()),
+                        relative: ifrom.level as i32,
+                        range: ifrom.range(),
+                        flags: make_import_flags(ser),
+                    });
                 } else {
                     // Regular from...import statement
                     ser.write_tag(TAG_IMPORT_FROM);
@@ -2595,6 +2613,18 @@ pub fn serialize_imports(
                     }
                 }
 
+                ser.write_location(*range);
+                ser.write_tagged_int(*flags as i64);
+            }
+            ImportStatement::ImportAll {
+                module,
+                relative,
+                range,
+                flags,
+            } => {
+                ser.write_tag(TAG_IMPORTALL_METADATA);
+                ser.write_bytes(module.as_bytes());
+                ser.write_tagged_int(*relative as i64);
                 ser.write_location(*range);
                 ser.write_tagged_int(*flags as i64);
             }
