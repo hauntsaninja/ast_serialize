@@ -63,12 +63,14 @@ fn parse(
     let always_false = always_false.unwrap_or_default();
 
     let path = Path::new(&fnam);
-    let (ast_bytes, syntax_errors, type_ignore_lines, import_bytes) =
-        serialize_ast::serialize_python_file(
-            path,
-            skip_function_bodies,
-            options::Options::new(python_version, platform, always_true, always_false),
-        )
+    let (ast_bytes, syntax_errors, type_ignore_lines, import_bytes) = py
+        .allow_threads(|| {
+            serialize_ast::serialize_python_file(
+                path,
+                skip_function_bodies,
+                options::Options::new(python_version, platform, always_true, always_false),
+            )
+        })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     // Convert syntax errors to Python dicts
